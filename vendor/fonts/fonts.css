@@ -1,0 +1,8 @@
+/* The game's three typefaces, bundled for the release build (test/build_release.py) so it makes no request to Google Fonts.
+   Latin subset, from the @fontsource packages. All three are under the SIL Open Font License (see the LICENSE-*.txt files here). */
+@font-face{font-family:'IM Fell English';font-style:normal;font-weight:400;font-display:swap;src:url(im-fell-english-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'IM Fell English';font-style:italic;font-weight:400;font-display:swap;src:url(im-fell-english-latin-400-italic.woff2) format('woff2')}
+@font-face{font-family:'IM Fell English SC';font-style:normal;font-weight:400;font-display:swap;src:url(im-fell-english-sc-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Alegreya Sans';font-style:normal;font-weight:400;font-display:swap;src:url(alegreya-sans-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Alegreya Sans';font-style:normal;font-weight:500;font-display:swap;src:url(alegreya-sans-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Alegreya Sans';font-style:normal;font-weight:700;font-display:swap;src:url(alegreya-sans-latin-700-normal.woff2) format('woff2')}

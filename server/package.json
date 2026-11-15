@@ -1,0 +1,19 @@
+{
+  "name": "lighthouse-save-service",
+  "version": "0.1.0",
+  "description": "Save sync, anonymous progress events and feedback for Brave Quest: Lighthouse",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
