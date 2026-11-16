@@ -80,6 +80,14 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   - **Damage units are half-hearts.** Player starts with maxHp 4 (2 hearts); progression.js derives maxHp (max 14, 7 hearts).
 - UI calls (hud.js implements): `G.ui.say(text, who?, {priority:'high'|'normal'|'low', key})` (every line is also kept in the message log, pause menu > Messages; reading time is the player's choice: `G.ui.captionSpeed` 'relaxed'|'standard'|'hold'; `G.ui.advance()` = Enter / D-pad down / a tap on the caption), `G.ui.objective(text, sub?)`, `G.ui.toast(title, small?)`, `G.ui.bossBar(name|null, frac)`, `G.ui.flash()`, `G.ui.shake(amount)`.
 - HUD read-outs for tests (hud.js): `G.ui.captionStack()` → `{depth (back cards showing, 0–2), count ('+N' when 3+ lines wait, else ''), who:[names on the back cards], leaving}` — waiting captions show as a stack of card edges behind the front one (decoration only; the queue/pacing rules are unchanged); `G.ui.staminaWheel()` → `{shown, state:'ok'|'low'|'exh'|'full'|'', opacity, frac}`; `G.ui.padStatus()` → `{state:'connected'|'none'|'blocked'|'unsupported', text}` (the controller line in the pause menu and on the Controls screen, `[data-pad-status]`).
+- Cut scenes (onboarding.js): `G.cine.play(id,{dur,shot(k,t,out),onEnd,...})` letterboxed, plays once per save (`seen` is in the save),
+  skipped by any key, tap, or the attack/jump/interact/roll/lock/sprint/shutter/potion/pause/advance actions (so any pad button), after 0.4 s.
+  `shot` sets `out.cp`/`out.lp`/`out.fov` each frame. `G.cine.path(id,{path:[V3],look:[V3],fromCamera,fov,dur,hold,...})` drives the camera
+  along a Catmull-Rom spline (eased by arc length; `fromCamera` starts at the follow camera, looking at Rowan). Options for both:
+  `safe` (Rowan takes no hits, prompt rows hidden), `hud:false` (hearts, objective, pause button, quest marker hidden), `music` (a
+  `G.audio.music.setOverride` state for the shot, e.g. `'wistful'`, restored after), `handBack:{yaw,pitch}` (or a fn) for the follow camera,
+  `fadeOut` (s, dip to black at the end). Read-outs: `G.cine.on/id/safe/clean/t/dur/seen(id)`, `G.cine.skip()`. Event `cine` {on,id}.
+  Game time only (deterministic under `G.step`, runs under `?headless`). Tests skip shots with `G.cine.skip()`.
 - Pickups (flow.js implements): `G.pickups.spawn('heart'|'mushroom', pos)`.
 - Companions (js/companions.js, COMPANIONS.md): `G.companions = {ember, corvin, has(id), send(id), call(id), spots, shardSpots, names, raven, debug}`;
   `send('ember')` = R (at a fox spot: go; else heel), `send('corvin')` = T (at a raven spot: go; else scout, 45 s cooldown). Hooks it uses:
@@ -123,6 +131,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `stag:engage` | — | monsters (the Hollow Stag leaves its guard over Hesper's lantern) |
 | `finale:start` | — | flow (when you step outside after lamp:cured); finale_boss.js answers it — the Stag no longer does |
 | `boss:dead` | {who:'stag'\|'gloaming'} | monsters (stag) / finale_boss (gloaming). Only `who:'gloaming'` ends Act 1 |
+| `wake:done` | {from, windows} | flow (the new game's opening lines on the beach have finished; onboarding.js plays the opening shot) |
 | `map:waypoint` | {id, quiet} | map (a waystone unlocked; quiet = granted from an old save / home) |
 | `map:travel` | {id, phase:'start'\|'arrive'\|'done'} | map (fast travel: fade out → moved → faded back in) |
 | `companion:earned` | {id:'ember'\|'corvin', quiet} | companions (quiet = granted from an old save / a load) |

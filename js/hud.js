@@ -417,7 +417,7 @@ function updateWorldUI(dt){
   }else{ stam.hidden=true; if(!playing||full){ if(stamCls)stam.classList.remove(stamCls); stamCls=''; } }
   // objective marker
   const q=G.quest&&G.quest.target;
-  if(playing&&q&&P.pos){
+  if(playing&&q&&P.pos&&!(G.cine&&G.cine.clean)){   // a clean cut scene (onboarding.js, hud:false) shows no marker
     const d=Math.hypot(q.x-P.pos.x,q.z-P.pos.z);
     if(d<6){marker.hidden=true;}
     else{

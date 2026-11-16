@@ -567,6 +567,7 @@ Object.assign(P,{
     const kind=info.kind||'melee';
     const bypass=info.ignoreIframes||kind==='fall';
     if(!bypass&&(iframes>0||isRollInvuln()))return false;
+    if(G.cine&&G.cine.safe)return false;   // a safe cut scene (onboarding.js G.cine): nothing lands while the camera is away
     let dmg=Math.max(0,info.damage==null?1:info.damage);
     for(const f of P.hurtFilters){ try{ const r=f(dmg,info); if(r!=null&&isFinite(r))dmg=Math.max(0,r); }catch(e){ console.error(e); } }   // a fight can soften a blow (northfire.js: his father catches the one that would put Rowan down)
     P.hp=Math.max(0,P.hp-dmg);
