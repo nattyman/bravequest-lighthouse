@@ -1,7 +1,8 @@
 """HUD e2e (~4-6 min): the stacked caption cards (back cards, +N badge, the slide when the front card goes, reduced motion),
 the stamina wheel (hidden at full, green / amber / exhausted / refill pulse) and the controller status (standard pad,
 non-standard Xbox layout, a ghost pad listed first, a null entry, a SecurityError, a permissions policy that forbids
-'gamepad', no pads), including A starting the game from the title.
+'gamepad', no pads), including A starting the game from the title; the touch buttons on a phone (where each sits, sizes,
+nothing overlapping, each firing its own action) and the pause menu's touch legend.
 Screenshots go to /tmp/claude-0/hud/ (desktop 1280x760, phone portrait 390x844 and landscape 844x390).
 usage: python3 test/hud_e2e.py [url]   (default http://localhost:8800/dev.html?debug&headless)
 """
@@ -135,6 +136,9 @@ async def views(b):
         await pg.wait_for_timeout(700)
         r=await pg.evaluate("(()=>{ const e=document.querySelector('#pause [data-pad-status]'); const r=e.getBoundingClientRect(); return {mode:G.state.mode,text:e.textContent,state:e.dataset.state,vis:r.height>0}; })()")
         check(f'pause:{tag}',r['mode']=='paused' and r['state']=='connected' and 'Xbox Wireless Controller — connected' in r['text'] and r['vis'],r)
+        # a controller in use: its legend, never the touch one (on a phone too)
+        r=await pg.evaluate(LEGEND_JS)
+        check(f'pause-legend:{tag}',r['pad'] and not r['touch'] and not r['kb'] and r['device']=='gamepad',{k:r[k] for k in ('device','pad','touch','kb')})
         await pg.evaluate("(()=>{ const e=document.querySelector('#pause [data-pad-status]'); e.scrollIntoView({block:'center'}); })()")
         await shot(pg,f'pause-controller-{tag}')
         check(f'errors:{tag}',not errs,errs[:5])
@@ -189,6 +193,83 @@ async def pads(b):
         check(f'pad:{kind}:errors',not [e for e in errs if 'Gamepad' not in e],errs[:5])
         await ctx.close()
 
+TOUCH_JS=r"""(()=>{ const R=b=>{ const r=b.getBoundingClientRect(); return {x:(r.left+r.right)/2,y:(r.top+r.bottom)/2,w:r.width,l:r.left,t:r.top,r:r.right,b:r.bottom}; };
+  const btn=a=>document.querySelector(`#touch button[data-act="${a}"]`);
+  const s=R(btn('attack')), off={}; for(const a of ['jump','interact','roll','lock','shutter'])off[a]=(o=>({dx:Math.round(o.x-s.x),dy:Math.round(o.y-s.y),w:o.w}))(R(btn(a)));
+  // every contextual button shown at once: no two circles may touch, all on screen, none in the stick's left 42%, none over the top HUD
+  const hid=[...document.querySelectorAll('#touch button')].filter(b=>b.hidden); hid.forEach(b=>b.hidden=false);
+  const all=[...document.querySelectorAll('#touch button')].filter(b=>b.getClientRects().length).map(b=>({a:b.dataset.act,...R(b)}));
+  const close=[]; for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){ const g=Math.hypot(all[i].x-all[j].x,all[i].y-all[j].y)-(all[i].w+all[j].w)/2; if(g<4)close.push([all[i].a,all[j].a,Math.round(g)]); }
+  const offscreen=all.filter(b=>b.l<0||b.t<0||b.r>innerWidth||b.b>innerHeight).map(b=>b.a);
+  const core=all.filter(b=>['attack','jump','interact','roll','lock','shutter','potion'].includes(b.a));
+  const inStick=core.filter(b=>b.l<innerWidth*.42).map(b=>b.a);
+  const top=[...document.querySelectorAll('#pauseBtn,#mapBtn,#hud .hud-top')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());
+  const overTop=all.filter(b=>top.some(t=>b.l<t.right&&t.left<b.r&&b.t<t.bottom&&t.top<b.b)).map(b=>b.a);
+  hid.forEach(b=>b.hidden=true);
+  // each button fires its own action: the button on top at its centre takes the press, and only its action goes down
+  const ACTS=['attack','jump','interact','roll','lock','shutter'], fires={};
+  for(const a of ACTS){ const c=R(btn(a)), hit=document.elementFromPoint(c.x,c.y), b=hit&&hit.closest('#touch button');
+    if(!b){ fires[a]='nothing at its centre'; continue; }
+    b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerType:'touch'}));
+    const down=ACTS.filter(x=>G.input.down(x)); b.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch'}));
+    fires[a]=b.dataset.act===a&&down.length===1&&down[0]===a?'ok':{hit:b.dataset.act,down}; }
+  return {strike:s.w,off,close,offscreen,inStick,overTop,fires,device:G.input.device}; })()"""
+
+LEGEND_JS=r"""(()=>{ const p=document.getElementById('pause'), t=p.querySelector('[data-touch-legend]'), k=p.querySelector('[data-kb-legend]'), pl=p.querySelector('[data-pad-legend]');
+  const vis=e=>!!e&&!e.hidden&&e.getClientRects().length>0;
+  return {mode:G.state.mode,device:G.input.device,touch:vis(t),kb:vis(k),pad:vis(pl),text:t?t.innerText.replace(/\s+/g,' '):'',
+    chips:t?[...t.querySelectorAll('.tb')].map(c=>c.textContent.trim()||'icon'):[]}; })()"""
+
+async def touch(b):
+    """the thumb cluster on a touch phone (no controller): Jump right above Strike where Use was, Roll out where Lock was,
+    Jump and Roll a size up but under Strike, nothing touching; each button fires its own action; the pause menu lists the
+    touch controls on touch and the keyboard legend again once a keyboard is used"""
+    only=os.environ.get('TOUCH_ONLY','')
+    for tag,view in [('landscape',{'width':844,'height':390}),('small',{'width':667,'height':375}),('portrait',{'width':390,'height':844})]:
+        if only and tag not in only: continue
+        ctx,pg,errs=await boot(b,'none',view,True)
+        await play(pg)
+        await pg.evaluate("T.spot(); G.ui.clearCaptions()")
+        r=await pg.evaluate(TOUCH_JS)
+        o=r['off']; near=lambda v,w,tol=4: abs(v-w)<=tol
+        land=tag!='portrait'
+        pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)            # Jump where Use was: right above Strike
+             and near(o['interact']['dx'],-96) and near(o['interact']['dy'],0)  # Use where Jump was: left of Strike
+             and near(o['lock']['dx'],-68) and near(o['lock']['dy'],-68)        # Lock where Roll was: the diagonal
+             and ((o['roll']['dx']<=-160 and near(o['roll']['dy'],0)) if land    # Roll where Lock was: out past Use (landscape) ...
+                  else (near(o['roll']['dx'],0) and o['roll']['dy']<=-160)))     # ... or on top of the column (portrait)
+        check(f'touch:layout:{tag}',pos and r['device']=='touch',{k:r[k] for k in ('off','device')})
+        sizes=(r['strike']>=80 and o['jump']['w']>60 and o['roll']['w']>60 and r['strike']-o['jump']['w']>=12 and r['strike']-o['roll']['w']>=12
+               and o['interact']['w']==60 and o['lock']['w']==60)
+        check(f'touch:sizes:{tag}',sizes,{'strike':r['strike'],**{a:o[a]['w'] for a in o}})
+        check(f'touch:clear:{tag}',not r['close'] and not r['offscreen'] and not r['inStick'] and not r['overTop'],{k:r[k] for k in ('close','offscreen','inStick','overTop')})
+        check(f'touch:fires:{tag}',all(v=='ok' for v in r['fires'].values()),r['fires'])
+        await pg.evaluate("G.headless.draw(3)"); await pg.wait_for_timeout(300); await shot(pg,f'touch-cluster-{tag}')
+        # the pause menu: the touch legend, with the button names and the held moves, and no keyboard rows
+        await pg.evaluate("(()=>{ document.getElementById('pauseBtn').click(); G.step(1/30,2); })()"); await pg.wait_for_timeout(500)
+        r=await pg.evaluate(LEGEND_JS)
+        want=['Strike strike, hold to charge','Jump jump, hold to glide','Roll dodge roll','Lock lock on','Use interact','Shut lantern shutter','drag to move','drag to look around','next message']
+        check(f'pause-touch:{tag}',r['mode']=='paused' and r['touch'] and not r['kb'] and not r['pad'] and all(w in r['text'] for w in want),r)
+        if tag=='landscape':
+            await pg.evaluate("(()=>{ const p=document.getElementById('pause'); (p.querySelector('[data-touch-legend]:not([hidden])')||p.querySelector('[data-kb-legend]')).scrollIntoView({block:'start'}); document.activeElement&&document.activeElement.blur(); })()")
+            await shot(pg,'pause-touch-landscape')
+            # a keyboard on the phone takes over: the keyboard legend comes back (the existing device rule); a touch brings the touch one back
+            await pg.keyboard.press('ShiftLeft'); await pg.evaluate("G.step(1/30,2)")
+            k=await pg.evaluate(LEGEND_JS)
+            await pg.evaluate("window.dispatchEvent(new TouchEvent('touchstart',{bubbles:true})); G.step(1/30,2)")
+            t2=await pg.evaluate(LEGEND_JS)
+            check('pause-touch:keyboard-on-phone',k['device']=='keyboard' and k['kb'] and not k['touch'] and t2['device']=='touch' and t2['touch'] and not t2['kb'],{'kb':k,'back':{x:t2[x] for x in ('device','touch','kb')}})
+        check(f'touch:errors:{tag}',not errs,errs[:5])
+        await ctx.close()
+    # desktop, no controller: the keyboard legend as before, no touch legend
+    ctx,pg,errs=await boot(b,'none')
+    await play(pg)
+    await pg.evaluate("(()=>{ document.getElementById('pauseBtn').hidden=false; document.getElementById('pauseBtn').click(); G.step(1/30,2); })()"); await pg.wait_for_timeout(300)
+    r=await pg.evaluate(LEGEND_JS)
+    check('pause-touch:desktop-keyboard',r['mode']=='paused' and r['kb'] and not r['touch'] and r['device']=='keyboard',r)
+    check('touch:errors:desktop',not errs,errs[:5])
+    await ctx.close()
+
 async def main():
     t0=time.time()
     async with async_playwright() as p:
@@ -197,6 +278,7 @@ async def main():
         if not only or 'pads' in only: await pads(b)
         if not only or 'reduced' in only: await reduced(b)
         if not only or 'views' in only: await views(b)
+        if not only or 'touch' in only: await touch(b)
         await b.close()
     print(('PASS' if ok_all else 'FAIL'),f'{len(results)} checks',f'{time.time()-t0:.0f}s'); sys.exit(0 if ok_all else 1)
 asyncio.run(main())

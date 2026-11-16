@@ -452,6 +452,9 @@ function glyph(n){
 }
 G.ui.glyph=glyph;
 const usingPad=()=>G.input.device==='gamepad';
+/* touch: the same rule keyCap uses for the companions' buttons (a phone that hasn't switched to a keyboard); a controller wins */
+const usingTouch=()=>!usingPad()&&(G.input.device==='touch'||(G.isMobile&&G.input.device!=='keyboard'));
+G.ui.usingTouch=usingTouch;
 function keyCap(k,isInteract){
   if(usingPad()){ const g=isInteract?'Y':PAD_OF_KEY[k]; if(g)return glyph(g); }
   if(TOUCH_OF_KEY[k]&&(G.input.device==='touch'||(G.isMobile&&G.input.device!=='keyboard')))return `<span class="tap">${TOUCH_OF_KEY[k]}</span>`;
@@ -557,7 +560,8 @@ function refreshPadUI(){
     if(!el.dataset.filled){ el.innerHTML=`<span class="eyebrow">Controller supported</span><div class="controls">${padRows()}</div>`; el.dataset.filled='1'; }
     el.hidden=!st.connected;
   });
-  document.querySelectorAll('[data-kb-legend]').forEach(el=>{ el.hidden=pad&&st.connected; });
+  // the pause menu shows the touch legend instead on a touch device (refreshTouchLegend fills it)
+  document.querySelectorAll('[data-kb-legend]').forEach(el=>{ el.hidden=(pad&&st.connected)||(usingTouch()&&!!el.parentNode.querySelector('[data-touch-legend]')); });
   const note=$('padNote');
   if(note){
     if(!st.connected&&(st.blocked||st.policy===false)){ note.hidden=false; note.classList.add('warn'); note.textContent=BLOCKED_MSG; }
@@ -608,6 +612,40 @@ function updateGlassUI(dt){
   if(own)glassRows();
   if(glassBtn){ const usable=own&&!!(G.input.BIND&&G.input.BIND.glass); glassBtn.hidden=!usable; glassBtn.classList.toggle('up',!!(G.glass&&G.glass.raised)); }
 }
+
+/* ---------- the pause menu's touch legend ([data-touch-legend]): on a touch device it replaces the keyboard legend there.
+   Same device rule as the prompts (usingTouch, beside keyCap). ---------- */
+const TOUCH_DOES={attack:'strike, hold to charge',jump:'jump, hold to glide',roll:'dodge roll',lock:'lock on',interact:'interact',
+  shutter:'lantern shutter',potion:'drink a draught',glass:'hold to raise the Remembering Glass'};
+const TOUCH_ORDER=['attack','jump','roll','lock','interact','shutter','potion','glass','fox','raven'];
+function touchChip(b){
+  const svg=b.querySelector('svg');
+  if(svg)return `<b class="tb icon" aria-label="${esc(b.getAttribute('aria-label')||'')}">${svg.outerHTML}</b>`;
+  return `<b class="tb${b.classList.contains('big')?' big':''}">${esc(b.textContent.trim())}</b>`;
+}
+/* the companions' rows say what the keyboard legend says for R / T (companions.js writes those once they're with you) */
+function compText(key){ const r=document.querySelector(`[data-kb-legend] [data-comp="${key}"]`); if(!r)return ''; const k=r.querySelector('kbd'); return r.textContent.slice(k?k.textContent.length:0).trim(); }
+function touchLegendHTML(){
+  const rows=[`<span><b class="tg">Left thumb</b> drag to move</span>`,`<span><b class="tg">Right side</b> drag to look around</span>`];
+  for(const act of TOUCH_ORDER){
+    const b=document.querySelector(`#touch button[data-act="${act}"]`); if(!b||b.hidden)continue;
+    const what=act==='fox'?compText('R'):act==='raven'?compText('T'):TOUCH_DOES[act]; if(!what)continue;
+    rows.push(`<span>${touchChip(b)} ${esc(what)}</span>`);
+  }
+  const mb=document.getElementById('mapBtn'); if(mb)rows.push(`<span>${touchChip(mb)} map</span>`);
+  rows.push(`<span><b class="tg">Tap a message</b> next message</span>`,`<span><b class="tg">Messages tab</b> past messages</span>`);
+  return rows.join('');
+}
+function refreshTouchLegend(){
+  const touch=usingTouch();
+  document.querySelectorAll('[data-touch-legend]').forEach(el=>{
+    if(touch){ const h=touchLegendHTML(); if(el.innerHTML!==h)el.innerHTML=h; }
+    el.hidden=!touch;
+  });
+}
+G.on('mode',e=>{ if(e&&e.mode==='paused')refreshTouchLegend(); });
+G.on('input:device',refreshTouchLegend);
+refreshTouchLegend();
 
 /* ---------- touch buttons ---------- */
 document.querySelectorAll('#touch button').forEach(b=>{
