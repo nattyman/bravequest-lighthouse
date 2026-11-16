@@ -497,7 +497,7 @@ const onGrid=(t,unit)=>rec.playing?nextGrid(t+.03,unit||PULSE):t;
 function recDip(t,depth,hold){ if(!recBus)return; const g=recBus.gain; g.cancelScheduledValues(t); g.setValueAtTime(g.value,t); g.linearRampToValueAtTime(.85*depth,t+.6); g.setValueAtTime(.85*depth,t+.6+hold); g.linearRampToValueAtTime(.85,t+.6+hold+2.5); }
 
 /* ---- game state → music state ---- */
-const STATES=['title','explore','forest','tower','combat','boss','cured','ending','dead','silent','caveDark','caveLit','caveCombat','caveBoss','caveResolve','caveHold'];
+const STATES=['title','explore','forest','tower','combat','boss','cured','ending','dead','silent','caveDark','caveLit','caveCombat','caveBoss','caveResolve','caveHold','wistful'];
 // (playtest 2026-11-09: in the Vigil the rooms are stacked, so a hound on the floor below kept the battle music on;
 //  only count what's on your own level)
 function threatNear(P){ if(G.monsters&&G.monsters.list) for(const m of G.monsters.list){
@@ -533,6 +533,8 @@ function musicState(mode){
 // recording mix per state: group gains, core low-pass (Hz), core warmth (dB low shelf)
 const MIX={
   title:  {title:.95, core:0,   rhythm:0,   power:0,   lp:20000, warm:0},
+  // the opening cut scene (onboarding.js, override 'wistful'): the title's calm excerpt alone, a little under its title level
+  wistful:{title:.6,  core:0,   rhythm:0,   power:0,   lp:20000, warm:0},
   explore:{title:0,   core:.85, rhythm:0,   power:.28, lp:20000, warm:0},
   cured:  {title:0,   core:1,   rhythm:.4,  power:.55, lp:20000, warm:3.5},
   forest: {title:0,   core:.62, rhythm:0,   power:0,   lp:950,   warm:0},
@@ -572,7 +574,7 @@ function synthWeights(st,mode){
   if(s==='caveDark'){ W.caveDark=1; return W; }
   // (the dungeon song's own percussion is light and drops out under its choir, so the synth frame drum carries more of it)
   if(s==='caveCombat'){ W.combat=live?(caveLive()?.5:.3):.8; if(base==='caveLit')W.cave=.5; else W.caveDark=.6; return W; }
-  if(s==='title'){ W.title=(live||rec.bufs.title)?0:1; return W; }
+  if(s==='title'||s==='wistful'){ W.title=(live||rec.bufs.title)?0:(s==='wistful'?.7:1); return W; }
   if(s==='ending'){ W.title=live?0:.9; return W; }
   if(s==='boss'){ W.boss=live?.55:1; W.explore=live?0:.25; return W; }
   const L={tower:1,forest:live?.55:1,explore:live?.5:1,cured:live?.5:1};
@@ -1593,7 +1595,7 @@ function buildUI(){
 /* ---------- system ---------- */
 G.audio={settings,get ready(){return !!ctx;},get context(){return ctx;},get output(){return comp;},get layers(){return layers;},get _amb(){return amb;}, sfx:{list:SFX_LIST,get loaded(){return Object.keys(sfxBuf).filter(k=>sfxBuf[k].buf);},play:(n,o)=>playSfx(n,o||{}),get loops(){return loops.size;}, get log(){return sfxLog.slice();}},S,I,unlock,
   music:{ get loaded(){return rec.loaded;}, get failed(){return rec.failed;}, get error(){return rec.error;}, get playing(){return rec.playing;},
-    get state(){return rec.state;}, get startTime(){return rec.start;}, get offset(){return rec.offset;},
+    get state(){return rec.state;}, get override(){return rec.override;}, get startTime(){return rec.start;}, get offset(){return rec.offset;},
     get groups(){ const o={}; for(const k of REC.files){ const n=rec.nodes[k]; o[k]={loaded:!!rec.bufs[k],duration:rec.bufs[k]?rec.bufs[k].duration:0,playing:!!(n&&n.src),gain:n?+n.gain.gain.value.toFixed(3):0,target:+(rec.w[k]||0).toFixed(3)}; } return o; },
     get synth(){ const o={}; for(const k of LAYER_NAMES)o[k]=+layers[k].w.toFixed(3); return o; },
     get filter(){ return coreLP?Math.round(coreLP.frequency.value):null; },

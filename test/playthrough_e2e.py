@@ -41,6 +41,34 @@ EXTRA=r"""(()=>{
 ACT1=[
  ("newGame", r"""(()=>{ document.getElementById('begin').click(); G.step(1/30,10);
    return {ok:G.quest.step==='cottage'&&G.lighthouse.darkK>.9&&!!G.lighthouse.beam&&G.state.mode==='play',step:G.quest.step,obj:T.OBJ()}; })()"""),
+ # the opening cut scene (onboarding.js G.cine.path 'opening'): after the beach thought about the warm cottage windows the camera
+ # climbs the cliff path to the lighthouse and the cottage, then hands back. The clock is held for these checks (G.step only).
+ ("opening", r"""(()=>{ G.headless&&(G.headless.hold=true); const C=G.cine, W=/warm light in the cottage windows/; let n=0;
+   while(!C.on&&n<2000){ G.ui.advance(); G.step(1/30,2); n++; }
+   const cap=G.ui.captions(), M=G.ui.messages(), last=M[M.length-1], said=W.test(last&&(last.text||last.t)||''), capUp=!!(cap.cur&&W.test(cap.cur.text));
+   return {ok:C.on&&C.id==='opening'&&G.player.inputEnabled===false&&said&&!capUp&&MUS.last==='wistful'&&G.quest.step==='cottage',on:C.on,id:C.id,n,said,capUp,music:MUS.last}; })()"""),
+ ("openingLocked", r"""(()=>{ const P=G.player, p0=P.pos.clone(), hp=P.hp; const hit=P.hurt({damage:2,dir:new G.THREE.Vector3(1,0,0),knockback:6});
+   G.input.setVirtual('forward',true); G.input.setVirtual('attack',true); G.step(1/30,30); G.input.setVirtual('forward',false); G.input.setVirtual('attack',false); G.step(1/30,2);
+   const moved=P.pos.distanceTo(p0);
+   return {ok:G.cine.on&&G.cine.safe&&hit===false&&P.hp===hp&&moved<.05&&P.inputEnabled===false,hit,hp:P.hp,moved:+moved.toFixed(3)}; })()"""),
+ ("openingGoal", r"""(()=>{ const C=G.cine, cam=G.camera, V=G.THREE.Vector3; let low=1e9, g=0;
+   while(C.on&&C.t<C.dur-1.1&&g<600){ G.step(1/30,1); g++; low=Math.min(low,cam.position.y-G.floorAt(cam.position.x,cam.position.z,cam.position.y)); }
+   cam.updateMatrixWorld(); const L=G.world.landmarks, inView=p=>{ const q=p.clone().project(cam); return Math.abs(q.x)<.95&&Math.abs(q.y)<.95&&q.z<1; };
+   const r={on:C.on,t:+C.t.toFixed(2),low:+low.toFixed(1),lh:inView(new V(L.lighthouse.x,L.lighthouse.y+8,L.lighthouse.z)),lhTop:inView(new V(L.lighthouse.x,L.lighthouse.y+20,L.lighthouse.z)),
+     cot:inView(new V(L.cottage.x,L.cottage.y+2,L.cottage.z)),far:+cam.position.distanceTo(G.player.pos).toFixed(0)};
+   r.ok=r.on&&r.low>2&&r.lh&&r.lhTop&&r.cot&&r.far>40; return r; })()"""),
+ ("openingHandBack", r"""(()=>{ const C=G.cine, P=G.player; let g=0; while(C.on&&g<200){ G.step(1/30,1); g++; } G.step(1/30,2);
+   const b=G.world.landmarks.cliffPathBottom, want=Math.atan2(b.x-P.pos.x,b.z-P.pos.z), d=Math.abs(G.U.angDiff(P.camYaw,want));
+   const r={on:C.on,seen:C.seen('opening'),ctl:P.inputEnabled,yawOff:+d.toFixed(2),camNear:+G.camera.position.distanceTo(P.pos).toFixed(1),music:MUS.last};
+   const p0=P.pos.clone(); G.input.setVirtual('forward',true); G.step(1/30,20); G.input.setVirtual('forward',false); G.step(1/30,2); r.walked=+P.pos.distanceTo(p0).toFixed(2);
+   r.ok=!r.on&&r.seen&&r.ctl&&r.yawOff<.3&&r.camNear<12&&r.music===null&&r.walked>.5; return r; })()"""),
+ ("openingSkip", r"""(()=>{ const C=G.cine, P=G.player, S=G._onb.S, r={}; const run=()=>{ delete S.seen.opening; const ok=G._onb.openingShot(); G.step(1/30,20); return !!ok&&C.on; };
+   r.key0=run(); dispatchEvent(new KeyboardEvent('keydown',{key:'x',code:'KeyX'})); G.step(1/30,2); r.key=!C.on&&P.inputEnabled;
+   r.pad0=run(); G.input.setVirtual('advance',true); G.step(1/30,1); G.input.setVirtual('advance',false); G.step(1/30,2); r.pad=!C.on&&P.inputEnabled;
+   r.tap0=run(); dispatchEvent(new PointerEvent('pointerdown')); G.step(1/30,2); r.tap=!C.on&&P.inputEnabled&&G.camera.position.distanceTo(P.pos)<12;
+   r.music=MUS.last; r.seen=C.seen('opening'); G.emit('wake:done',{from:P.pos.clone(),windows:true}); G.step(1/30,3); r.again=C.on;
+   G.headless&&(G.headless.hold=false);
+   r.ok=r.key0&&r.key&&r.pad0&&r.pad&&r.tap0&&r.tap&&r.music===null&&r.seen&&!r.again; return r; })()"""),
  ("door", r"""(()=>{ G.player.teleport(172,42,0,Math.PI/2); G.input.setVirtual('forward',true); G.step(1/30,45); G.input.setVirtual('forward',false);
    const c=T.capAll(); return {ok:T.OBJ()==='Find a light'&&G.player.pos.x<176&&/doorway is black/.test(c),obj:T.OBJ(),cap:c.slice(0,80)}; })()"""),
  ("halloran", r"""(()=>{ const p=G.creatures.halloran.pos; G.player.teleport(p.x+1.6,p.y,p.z,0); G.step(1/30,10); T.talk(); const l=T.useL(); const card=T.card()==='Halloran'; const said=T.talk();
@@ -91,6 +119,10 @@ SAVE1=[
  ("continue1", r"""(()=>{ G.step(1/30,30); const lo=T.leftovers();
    return {ok:G.state.mode==='play'&&T.OBJ()==='Something is climbing the cliff'&&G.items.lantern.cured&&G.items.lantern.inCradle&&G.lighthouse.cured&&G.lighthouse.beam.lit&&G.items.staff.owned
      &&!G.finaleBoss.active&&!G.monsters.boss&&lo.bosses.length===0&&!lo.bossBar&&!G.loop.active,obj:T.OBJ(),step:G.quest.step,left:lo,beam:G.lighthouse.beam.lit}; })()"""),
+ # the opening cut scene was saved as seen: after the reload and Continue it does not come back
+ ("openingNoReplay", r"""(()=>{ const d=JSON.parse(localStorage.getItem('bq-save-v1')||'null'), o=d&&d.mods&&d.mods.onboarding;
+   G.emit('wake:done',{from:G.player.pos.clone(),windows:true}); G.step(1/30,5);
+   return {ok:!!(o&&o.seen&&o.seen.opening)&&G.cine.seen('opening')&&!G.cine.on,saved:!!(o&&o.seen&&o.seen.opening),seen:G.cine.seen('opening'),on:G.cine.on}; })()"""),
 ]
 FINALE=[
  ("gloamingRises", r"""(()=>{ const lh=G.world.lighthouse, d=lh.doorOut; G.player.teleport(d.x-1,d.y,d.z,-Math.PI/2); G.input.setVirtual('forward',true);

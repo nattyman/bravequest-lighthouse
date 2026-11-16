@@ -91,6 +91,7 @@ function updateAttract(dt){
    forest (the Hollow Stag guards Hesper's lantern at the Resisting Tree) → return (the swarm follows) → ascend → cure →
    descend/finale ('finale:start'; finale_boss.js builds the Gloaming) → done on boss:dead {who:'gloaming'}. */
 let wake=null;   // the opening lines on the beach, still to say
+let wakeEnd=null; // the last of them, on screen: when it has gone, 'wake:done' (onboarding.js plays the opening shot)
 /* the opening: each line waits for the one before to finish; anything left unsaid is dropped once you've moved on */
 function updateWake(dt){
   if(!wake)return;
@@ -101,7 +102,15 @@ function updateWake(dt){
   // anything else said since (the game moved on, or a test took over the captions): the rest of the opening is dropped
   const last=()=>{ const M=G.ui.messages?G.ui.messages():[], e=M[M.length-1]; return e?e.text+'|'+e.n+'|'+M.length:''; };
   if(wake.n!=null&&last()!==wake.n){ wake=null; return; }
-  G.ui.say(wake.lines.shift(),null,{key:'wake'}); wake.n=last(); wake.t=1.2; if(!wake.lines.length)wake=null;
+  const line=wake.lines.shift(); G.ui.say(line,null,{key:'wake'}); wake.n=last(); wake.t=1.2;
+  if(!wake.lines.length){ wakeEnd={text:line,from:wake.from,windows:/cottage windows/.test(line)&&!!wake.wreck,seen:false,t:0}; wake=null; }
+}
+function updateWakeEnd(dt){
+  if(!wakeEnd)return;
+  const c=G.ui.captions?G.ui.captions():null, w=wakeEnd, up=!!(c&&((c.cur&&c.cur.text===w.text)||c.queue.some(q=>q.text===w.text)));
+  w.t+=dt||0; if(up)w.seen=true;
+  if(up||(!w.seen&&w.t<1))return;     // still being read (or not on screen yet)
+  wakeEnd=null; G.emit('wake:done',{from:w.from.clone(),windows:w.windows});
 }
 let finaleArmed=false, finaleT=-1, bossDead=false, endingT=-1, sawDoor=false, stagDead=false, cradleObj=false, halAway=false, halScene=null;
 const storm=()=>G.items.storm||{};
@@ -135,7 +144,7 @@ function begin(fromSave){
         :'“Told her I’d be home for the spring fair.” It’s autumn. A path climbs off the sand toward the headland.'
   ]:[coat?'You wake on cold stone at the top of a sea cliff, shivering. Fog is rolling in off the water. The great lamp of the lighthouse is dark, and something darker turns slowly around it. But there is warm light in the cottage windows.'
         :'You wake on cold stone at the top of a sea cliff. Fog is rolling in off the water. Above you, the great lamp of the lighthouse is dark, and something darker turns slowly around it.'];
-  wake={lines:open,t:.6,from:V(st.x,st.y,st.z)};   // said one at a time as the captions come free (updateWake)
+  wakeEnd=null; wake={lines:open,t:.6,from:V(st.x,st.y,st.z),wreck:!!wr};   // said one at a time as the captions come free (updateWake)
 }
 function cottageDoor(){ const c=LM().cottageDoor||LM().cottage; return c?V(c.x,c.y,c.z):lmV('lighthouse',V(180,42,0)).add(V(-22,0,24)); }
 function onCloak(){
@@ -273,7 +282,7 @@ function updateBeats(dt){
   // the first step into the cottage: he grew up half in this room
   if(!G.flag('cottageIn')&&G.world.cottage&&G.world.cottage.inside&&P.pos&&G.world.cottage.inside(P.pos)){ G.flag('cottageIn',true);
     G.ui.say('“Hesper?” Nobody answers. The fire is in, the lamp over the table is lit, and a chair is pushed back as if someone only just got up.',null,{key:'cottageIn'}); }
-  updateForest(); updateWake(dt);
+  updateForest(); updateWake(dt); updateWakeEnd(dt);
 }
 
 /* ---------- saving ----------
