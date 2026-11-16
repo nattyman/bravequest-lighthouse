@@ -119,7 +119,8 @@ python3 test/build_release.py --api https://<save service> --version 0.9.0-beta.
 
 - It writes `dist/` (and a zip for itch.io): Three.js from `vendor/three/`, fonts from `vendor/fonts/`, nothing from a CDN.
 - It sets `window.BQ_CONFIG`, which turns the Test tools off and switches on `js/beta.js` (version tag, Sync
-  devices, Send feedback, anonymous progress pings) and the sync-code half of `js/cloud.js`. Without
+  devices, Send feedback, anonymous progress pings) and the sync-code half of `js/cloud.js`, which backs the
+  save up by itself after a minute of play unless the player has turned it off on that device. Without
   `BQ_CONFIG` (the Claude artifacts, `dev.html`) none of that runs.
 - The save service lives in `server/` (its own README: endpoints, tests, Coolify deploy). Its tests run in the
   `server` workflow; the game side is `test/beta_e2e.py` against a fake of the service.

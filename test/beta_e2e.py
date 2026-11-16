@@ -11,10 +11,11 @@ BUDGET = 240  # seconds a single check may take before the rest are skipped
 
 class Fake:
     """saves by sync key, plus the events and feedback it was sent"""
-    def __init__(self): self.saves = {}; self.events = []; self.feedback = []; self.puts = 0; self.down = False; self.other = []
+    def __init__(self): self.saves = {}; self.events = []; self.feedback = []; self.puts = 0; self.down = False; self.other = []; self.save_reqs = 0
     async def handle(self, route):
         rq = route.request; path = re.sub(r'^https://save\.test', '', rq.url); cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS'}
         async def send(status, body=None): await route.fulfill(status=status, headers=dict(cors, **{'Content-Type': 'application/json'}), body=json.dumps(body) if body is not None else '')
+        if path == '/v1/save' and rq.method != 'OPTIONS': self.save_reqs += 1   # every try at the save endpoint, answered or not
         if self.down: return await route.abort()
         if rq.method == 'OPTIONS': return await send(204)
         key = (rq.headers.get('authorization') or '').replace('Bearer ', '').replace('-', '').upper()
@@ -34,7 +35,7 @@ async def main():
         print(('ok   ' if ok else 'FAIL ') + name + ' : ' + json.dumps(info, default=str)[:400])
         if not ok: fails.append(name)
     async with async_playwright() as p:
-        b = await p.chromium.launch(args=['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'])
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])   # the same Chrome as the other suites: the bundled headless shell's GL is slow and outgrew memory here
         fake = Fake()
         async def device():
             ctx = await b.new_context(viewport={'width': 1100, 'height': 700})
@@ -43,6 +44,7 @@ async def main():
             pg.outside = []
             pg.on('request', lambda r: pg.outside.append(r.url) if not (r.url.startswith(URL.split('/dev.html')[0].split('/index.html')[0]) or r.url.startswith(API) or r.url.startswith('data:') or r.url.startswith('blob:')) else None)
             pg.set_default_navigation_timeout(180000)   # two WebGL pages share a slow machine
+            pg.set_default_timeout(90000)               # a click waits for steady frames, and a busy machine can take seconds per frame
             await pg.goto(URL, wait_until='domcontentloaded'); await pg.wait_for_function("window.G && G.cloud && G.beta && document.getElementById('loading') && getComputedStyle(document.getElementById('loading')).display==='none' || (window.G&&G.state&&G.state.mode==='title'&&!document.getElementById('begin').disabled)", timeout=180000)
             await pg.wait_for_timeout(1500)
             return ctx, pg
@@ -51,7 +53,9 @@ async def main():
                 print('SKIP ' + name + ' : needs ' + ', '.join(DEPENDS[name])); skipped.append(name); return
             try: await asyncio.wait_for(fn(), BUDGET)
             except Exception as e: check(name, False, {'error': (type(e).__name__ + ' ' + str(e))[:300]})
-        DEPENDS = {'syncOn': ['links'], 'upload': ['syncOn'], 'join': ['upload'], 'stale': ['join'], 'syncOff': ['stale'], 'outage': ['links']}
+        DEPENDS = {'syncOn': ['links'], 'upload': ['syncOn'], 'join': ['upload'], 'stale': ['join'], 'syncOff': ['stale'], 'outage': ['links'],
+                   'autoWait': ['links'], 'autoStart': ['autoWait'], 'autoPauseCard': ['autoStart'], 'autoReload': ['autoStart'],
+                   'autoOff': ['autoReload'], 'manualAfterOff': ['autoOff'], 'autoOutage': ['links']}
 
         ctx1, pg = await device()
 
@@ -91,7 +95,7 @@ async def main():
         async def feedback():
             await pg.evaluate("document.getElementById('pauseBtn').click()"); await pg.wait_for_timeout(400)
             r0 = await pg.evaluate("() => ({mode:G.state.mode, link:[...document.querySelectorAll('#pause .bq-links button')].map(b=>b.textContent)})")
-            await pg.evaluate("document.querySelector('#pause .bq-links button').click()"); await pg.wait_for_timeout(200)
+            await pg.evaluate("[...document.querySelectorAll('#pause .bq-links button')].find(b=>b.textContent==='Send feedback').click()"); await pg.wait_for_timeout(200)
             muted0 = await pg.evaluate("() => JSON.parse(localStorage.getItem('bq-audio')||localStorage.getItem('bq-settings')||'{}').muted||false")
             await pg.fill('#feedbackCard textarea', 'nine men ran and jumped in the fog'); await pg.focus('#feedbackCard textarea'); await pg.keyboard.press('End')
             for k in [' ', '`', 'm', ' ', 'n']: await pg.keyboard.press(k)   # real keys: space (the game eats it), backquote (test tools), m (map), n (mute)
@@ -101,7 +105,7 @@ async def main():
             r2 = await pg.evaluate("() => ({note:document.querySelector('#feedbackCard .savenote').textContent, text:document.querySelector('#feedbackCard textarea').value})")
             fb = fake.feedback[-1] if fake.feedback else {}
             check('typingIsNotGameInput', r1['text'] == 'nine men ran and jumped in the fog `m n' and r1['mode'] == 'paused' and not r1['map'] and 'Sound' not in r1['toast'], r1)
-            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Send feedback'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
+            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Sync devices', 'Send feedback'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
             await pg.click('#feedbackCard button:has-text("Back")'); await pg.wait_for_timeout(200)
             r = await pg.evaluate("() => ({pause:!document.getElementById('pause').hidden, card:document.getElementById('feedbackCard').hidden})")
             check('feedbackBack', r['pause'] and r['card'], r)
@@ -158,19 +162,155 @@ async def main():
         async def outage():
             # the service is unreachable: turning sync on says so and the game still saves locally
             await other_device(); fake.down = True
-            await pg.click('#title .bq-links button:has-text("Sync devices")'); await pg.click('#syncCard button:has-text("Turn on sync")'); await pg.wait_for_function("document.querySelector('#syncCard .savenote').textContent!=='One moment…'", timeout=60000)
-            r = await pg.evaluate("() => ({note:document.querySelector('#syncCard .savenote').textContent, state:G.cloud.state})")
-            check('outageSync', 'couldn’t be reached' in r['note'] and r['state'] == 'off', r)
-            await pg.click('#syncCard button:has-text("Back")')
-            await pg.evaluate("document.getElementById('begin').click()"); await pg.wait_for_timeout(1500)
-            r = await pg.evaluate("async () => { const ok=G.flow.writeSave(); await G.cloud.flush(); return {ok, local:!!localStorage.getItem('bq-save-v1'), mode:G.state.mode}; }")
-            check('outageLocalSave', r['ok'] and r['local'] and r['mode'] == 'play', r)
-            fake.down = False
+            try:
+                await pg.click('#title .bq-links button:has-text("Sync devices")'); await pg.click('#syncCard button:has-text("Turn on sync")'); await pg.wait_for_function("document.querySelector('#syncCard .savenote').textContent!=='One moment…'", timeout=60000)
+                r = await pg.evaluate("() => ({note:document.querySelector('#syncCard .savenote').textContent, state:G.cloud.state})")
+                check('outageSync', 'couldn’t be reached' in r['note'] and r['state'] == 'off', r)
+                await pg.click('#syncCard button:has-text("Back")')
+                await pg.evaluate("document.getElementById('begin').click()"); await pg.wait_for_timeout(1500)
+                r = await pg.evaluate("async () => { const ok=G.flow.writeSave(); await G.cloud.flush(); return {ok, local:!!localStorage.getItem('bq-save-v1'), mode:G.state.mode}; }")
+                check('outageLocalSave', r['ok'] and r['local'] and r['mode'] == 'play', r)
+            finally:
+                fake.down = False   # a failure above must not leave the fake down for the checks after it
         await step('outage', outage)
 
-        check('noOtherSites', not pg.outside, {'requests': pg.outside[:5]})
+        # ---- automatic backup: after 60 s of play a device with no code backs its save up by itself ----
+        # A fresh browser context (a new device, and a fresh page: one page reloaded many times grows until it crashes here)
+        pages = [pg]
+        async def new_device():
+            nonlocal ctx1, pg
+            await ctx1.close(); ctx1, pg = await device(); pages.append(pg)
+        # Play time is driven with G.step under G.headless.hold (both work without ?debug), so the machine's speed can't add play time.
+        HOOK = """() => { if(window.__hooked)return; window.__hooked=1; window.__said=[]; window.__claimed=false;
+            const o=G.ui.say; G.ui.say=function(t){ window.__said.push(String(t)); return o.apply(this,arguments); };
+            setInterval(()=>{ if(G.cloud.sync.code()||G.cloud.state==='on')window.__claimed=true; },50); }"""
+        TOLD = "() => window.__said.filter(t=>/backed up online/.test(t)).length"
+        async def play(sec):   # sec seconds of play time, in 1/10 s steps
+            await pg.evaluate("""async s => { G.headless.hold=true; let n=Math.round(s*10);
+                while(n>0){ const k=Math.min(n,100); G.step(1/10,k); n-=k; await new Promise(r=>setTimeout(r,0)); } }""", sec)
+        AUTO = "() => ({played:(G.cloud.sync.auto||{}).played, state:G.cloud.state, key:localStorage.getItem('bq-sync-key'), off:localStorage.getItem('bq-sync-off'), told:localStorage.getItem('bq-sync-auto'), save:!!localStorage.getItem('bq-save-v1'), mode:G.state.mode})"
+        auto = {}
+
+        async def autoWait():
+            await new_device(); await pg.evaluate(HOOK); base = fake.save_reqs
+            await pg.wait_for_timeout(2500)
+            r = await pg.evaluate(AUTO)
+            check('autoTitleNotCounted', r['played'] == 0 and r['state'] == 'off' and not r['key'], r)
+            await pg.evaluate("document.getElementById('begin').click()"); await pg.wait_for_timeout(800)
+            await play(30)
+            await pg.evaluate("document.getElementById('pauseBtn').click()")
+            await pg.evaluate("() => { G.headless.hold=true; G.step(1/10,300); }")   # 30 s while paused
+            r = await pg.evaluate(AUTO)
+            check('autoPauseNotCounted', r['mode'] == 'paused' and 29.9 <= r['played'] < 33, r)
+            await pg.evaluate("document.getElementById('resume').click()")
+            await play(59 - r['played'])
+            r = await pg.evaluate(AUTO)
+            check('autoNothingBefore60s', r['save'] and r['played'] < 60 and fake.save_reqs == base and not r['key'] and r['state'] == 'off', dict(r, reqs=fake.save_reqs - base))
+            await pg.evaluate("localStorage.removeItem('bq-save-v1')"); await play(2); await pg.wait_for_timeout(1500)
+            r = await pg.evaluate(AUTO)
+            check('autoWaitsForASave', r['played'] >= 60 and not r['save'] and fake.save_reqs == base and not r['key'] and r['state'] == 'off', dict(r, reqs=fake.save_reqs - base))
+            if fails and any(n in fails for n in ('autoNothingBefore60s', 'autoWaitsForASave')): fails.append('autoWait')
+        await step('autoWait', autoWait)
+
+        async def autoStart():
+            await pg.evaluate("G.flow.writeSave()")
+            await pg.wait_for_function("!!localStorage.getItem('bq-sync-key') && G.cloud.state==='on'", timeout=60000, polling=250)
+            r = await pg.evaluate(AUTO); key = r['key']; auto['key'] = key; sv = fake.saves.get(key)
+            at = await pg.evaluate("JSON.parse(localStorage.getItem('bq-save-v1')).at")
+            check('autoStart', bool(re.match(r'^[0-9A-HJKMNP-TV-Z]{12}$', key or '')) and bool(sv) and sv['at'] == at and r['state'] == 'on' and not r['off'], dict(r, has=bool(sv)))
+            for _ in range(20):
+                if await pg.evaluate(TOLD): break
+                await play(1)
+            n1 = await pg.evaluate(TOLD); await play(10); n2 = await pg.evaluate(TOLD)
+            r = await pg.evaluate("() => ({told:localStorage.getItem('bq-sync-auto'), log:window.__said.filter(t=>/backed up/.test(t)), mode:G.state.mode, card:!!document.querySelector('.card:not(#title):not([hidden]) .sheet')})")
+            check('autoToldOnce', n1 == 1 and n2 == 1 and r['told'] == 'told' and r['mode'] == 'play' and not r['card'], dict(r, n1=n1, n2=n2))
+            await pg.evaluate("async () => { G.flow.writeSave(); await G.cloud.flush(); }")
+            at = await pg.evaluate("JSON.parse(localStorage.getItem('bq-save-v1')).at")
+            check('autoMirrors', fake.saves[key]['at'] == at, {'stored': fake.saves[key]['at'], 'local': at})
+        await step('autoStart', autoStart)
+
+        async def autoPauseCard():
+            await pg.evaluate("document.getElementById('pauseBtn').click()")
+            await pg.click('#pause .bq-links button:has-text("Sync devices")'); await pg.wait_for_timeout(200)
+            vis = "s => { const e=document.querySelector(s); return !!e && !e.hidden && getComputedStyle(e).display!=='none'; }"
+            r = await pg.evaluate("""() => { const c=document.getElementById('syncCard'), v=b=>[...c.querySelectorAll('button')].filter(x=>!x.hidden).map(x=>x.textContent);
+                return {card:!c.hidden, pause:document.getElementById('pause').hidden, code:c.querySelector('.bq-code').textContent, buttons:v(), want:G.cloud.sync.code()}; }""")
+            check('syncFromPause', r['card'] and r['pause'] and r['code'] == r['want'] and r['code'] and 'I have a code' not in r['buttons'] and 'Turn off on this device' in r['buttons'], r)
+            await pg.click('#syncCard button:has-text("Back")'); await pg.wait_for_timeout(200)
+            r = await pg.evaluate("() => ({pause:!document.getElementById('pause').hidden, card:document.getElementById('syncCard').hidden, mode:G.state.mode})")
+            check('syncFromPauseBack', r['pause'] and r['card'] and r['mode'] == 'paused', r)
+            await pg.evaluate("document.getElementById('resume').click()")
+        await step('autoPauseCard', autoPauseCard)
+
+        async def autoReload():
+            await pg.evaluate("G.flow.writeSave()")
+            await pg.reload(wait_until='domcontentloaded'); await pg.wait_for_function(READY, timeout=180000); await pg.evaluate(HOOK)
+            await pg.wait_for_function("G.cloud.state==='on'", timeout=60000, polling=250)
+            await pg.evaluate("document.getElementById('continue').click()"); await pg.wait_for_timeout(800); await play(15)
+            r = await pg.evaluate(AUTO); n = await pg.evaluate(TOLD)
+            check('autoReload', r['state'] == 'on' and r['key'] == auto['key'] and n == 0, dict(r, told_n=n))
+        await step('autoReload', autoReload)
+
+        async def autoOff():
+            await pg.evaluate("document.getElementById('pauseBtn').click()")
+            await pg.click('#pause .bq-links button:has-text("Sync devices")'); await pg.click('#syncCard button:has-text("Turn off on this device")'); await pg.wait_for_timeout(200)
+            CARD = """() => { const c=document.getElementById('syncCard'); return {buttons:[...c.querySelectorAll('button')].filter(x=>!x.hidden).map(x=>x.textContent),
+                text:[...c.querySelectorAll('p')].filter(x=>!x.hidden).map(x=>x.textContent).join(' | ')}; }"""
+            c = await pg.evaluate(CARD); r = await pg.evaluate(AUTO)
+            check('autoOff', not r['key'] and r['off'] == '1' and r['state'] == 'off' and 'off on this device' in c['text'] and 'Turn on sync' in c['buttons'] and 'I have a code' not in c['buttons'] and 'title screen' in c['text'], dict(r, **c))
+            await pg.click('#syncCard button:has-text("Back")'); await pg.evaluate("document.getElementById('resume').click()")
+            base = fake.save_reqs
+            await pg.evaluate("async () => { G.flow.writeSave(); await G.cloud.flush(); }"); await play(2); await pg.wait_for_timeout(1000)
+            check('autoOffNoUploads', fake.save_reqs == base, {'reqs': fake.save_reqs - base})
+            await pg.reload(wait_until='domcontentloaded'); await pg.wait_for_function(READY, timeout=180000); await pg.wait_for_timeout(1000)
+            await pg.click('#title .bq-links button:has-text("Sync devices")'); c = await pg.evaluate(CARD); await pg.click('#syncCard button:has-text("Back")')
+            await pg.evaluate("document.getElementById('continue').click()"); await pg.wait_for_timeout(800); await play(62)
+            await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(1500)
+            r = await pg.evaluate(AUTO)
+            check('autoOffSticks', r['played'] >= 60 and not r['key'] and r['off'] == '1' and r['state'] == 'off' and fake.save_reqs == base
+                  and 'off on this device' in c['text'] and 'Turn on sync' in c['buttons'] and 'I have a code' in c['buttons'] and 'There’s no account' in c['text'], dict(r, card=c, reqs=fake.save_reqs - base))
+        await step('autoOff', autoOff)
+
+        async def manualAfterOff():
+            await pg.evaluate("G.flow.writeSave()"); await pg.reload(wait_until='domcontentloaded'); await pg.wait_for_function(READY, timeout=180000); await pg.wait_for_timeout(1000)
+            await pg.click('#title .bq-links button:has-text("Sync devices")'); await pg.click('#syncCard button:has-text("Turn on sync")')
+            await pg.wait_for_function("document.querySelector('#syncCard .savenote').textContent!=='One moment…'", timeout=60000)
+            r = await pg.evaluate(AUTO); sv = fake.saves.get(r['key'] or '')
+            check('manualAfterOff', r['state'] == 'on' and bool(r['key']) and r['key'] != auto['key'] and not r['off'] and bool(sv), dict(r, has=bool(sv)))
+            await pg.click('#syncCard button:has-text("Back")')
+        await step('manualAfterOff', manualAfterOff)
+
+        async def autoOutage():
+            await new_device(); await pg.evaluate(HOOK); fake.down = True; base = fake.save_reqs
+            try:
+                await pg.evaluate("document.getElementById('begin').click()"); await pg.wait_for_timeout(800)
+                await play(61)    # the 45 s autosave has written a save by now, so the threshold tries at once
+                await pg.wait_for_function("!(G.cloud.sync.auto&&G.cloud.sync.auto.trying)", timeout=30000, polling=250); await pg.wait_for_timeout(500)
+                tries = fake.save_reqs - base
+                r = await pg.evaluate("""() => ({key:localStorage.getItem('bq-sync-key'), state:G.cloud.state, note:document.getElementById('cloudNote').textContent,
+                    toast:document.getElementById('toast').textContent, said:window.__said.filter(t=>/reach|couldn|sync|online|error/i.test(t)), ok:G.flow.writeSave(), save:!!localStorage.getItem('bq-save-v1')})""")
+                check('autoOutageSilent', tries >= 1 and not r['key'] and r['state'] == 'off' and not r['note'] and not r['toast'] and not r['said'] and r['ok'] and r['save'], dict(r, tries=tries))
+                await pg.wait_for_timeout(1500); tries2 = fake.save_reqs - base
+                await pg.evaluate("document.getElementById('pauseBtn').click()")
+                await pg.click('#pause .bq-links button:has-text("Sync devices")')
+                c = await pg.evaluate("() => { const c=document.getElementById('syncCard'); return {code:c.querySelector('.bq-code').hidden?'':c.querySelector('.bq-code').textContent, buttons:[...c.querySelectorAll('button')].filter(x=>!x.hidden).map(x=>x.textContent), note:c.querySelector('.savenote').textContent}; }")
+                await pg.click('#syncCard button:has-text("Back")'); await pg.evaluate("document.getElementById('resume').click()")
+                check('autoOutageRetryWaits', tries2 == tries and not c['code'] and 'Turn on sync' in c['buttons'] and 'on' not in c['note'].lower(), dict(c, tries=tries, tries2=tries2))
+                claimed = await pg.evaluate("window.__claimed")
+                check('autoOutageNeverClaimedOn', claimed is False, {'claimed': claimed})
+            finally:
+                fake.down = False
+            await pg.wait_for_timeout(61000)     # the next try waits a minute of wall-clock time
+            await pg.evaluate("G.flow.writeSave()")
+            await pg.wait_for_function("!!localStorage.getItem('bq-sync-key') && G.cloud.state==='on'", timeout=60000, polling=250)
+            r = await pg.evaluate(AUTO); sv = fake.saves.get(r['key'])
+            check('autoOutageRetried', bool(sv) and r['state'] == 'on', dict(r, has=bool(sv)))
+        await step('autoOutage', autoOutage)
+
+        outside = [u for q in pages for u in q.outside]; errs = [e for q in pages for e in q.errs]
+        check('noOtherSites', not outside, {'requests': outside[:5]})
         check('onlyKnownEndpoints', not fake.other, fake.other[:5])
-        check('noPageErrors', not pg.errs, pg.errs[:3])
+        check('noPageErrors', not errs, errs[:3])
         await b.close()
     print('RESULT: ' + ('ALL PASS' if not fails else 'FAILED ' + ', '.join(fails)) + (' (skipped: ' + ', '.join(skipped) + ')' if skipped else ''))
     sys.exit(1 if fails else 0)

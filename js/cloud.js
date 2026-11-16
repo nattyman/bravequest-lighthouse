@@ -11,22 +11,37 @@
    In play:  every save flow.js writes is uploaded, at most one every 20 s,
              plus right away when the tab is hidden or the player quits.
    Outside Claude (the public beta on itch.io or its own page), the same mirror
-   can run against the Lighthouse save service (server/, see its README) when
-   the page sets window.BQ_CONFIG.api. There is no account: the player turns
-   sync on at the title, which makes a random 12-character sync code kept in
-   localStorage ('bq-sync-key'); entering that code on another device joins it.
-   The service only ever sees the code (it stores a hash) and the save.
+   runs against the Lighthouse save service (server/, see its README) when the
+   page sets window.BQ_CONFIG.api. There is no account: the save is kept under a
+   random 12-character sync code kept in localStorage ('bq-sync-key'); entering
+   that code on another device joins it. The service only ever sees the code
+   (it stores a hash) and the save.
+   Automatic backup: a device with no code starts on its own once the player has
+   had AUTO_AFTER seconds of actual play this page load (mode 'play', no cut
+   scene) and there is a local save to send. It makes a code and uploads the save
+   in one PUT; only when that lands is the code kept and sync shown as on, so a
+   failed try leaves nothing behind (the Sync card still offers "Turn on sync").
+   A failed try is silent and is repeated at a later save, at most once a minute.
+   The first time it starts, one caption says so at a quiet moment
+   ('bq-sync-auto': 'new' until said, then 'told'). "Turn off on this device"
+   remembers the choice ('bq-sync-off'), so it never switches itself back on;
+   turning sync on by hand or joining a code clears it. Never in Claude mode,
+   ?debug / test-save sessions, or when localStorage can't be written.
    With neither (a saved file, tests, the test-save slot) it stays off and the
    game saves to the browser exactly as before.
    API: G.cloud = { state: 'off'|'checking'|'on'|'local-only', mode: ''|'claude'|'sync', flush(),
-                    sync: { available, code(), enable(), join(code), disable() } }   (sync UI: beta.js)
+                    sync: { available, code(), off, enable(), join(code), disable(),
+                            auto: { after, played, trying } (read-only, for the Sync card and tests) } }   (sync UI: beta.js)
    ========================================================================= */
 (function(){
 'use strict';
 const G=window.G; if(!G)return;
+const AUTO_AFTER=60;            // seconds of actual play (this page load) before automatic backup starts on a device with no code
+const AUTO_RETRY=60000;         // ms: a failed automatic start is tried again at a later save, at most this often
 const GAP=20000, DOC_LIMIT=240*1024;
-const API=String((window.BQ_CONFIG&&window.BQ_CONFIG.api)||'').replace(/\/+$/,''), KEY_NAME='bq-sync-key';
-const S={state:'off',mode:'',ref:null,busy:false,dirty:false,lastPut:0,timer:0,remoteAt:0};
+const API=String((window.BQ_CONFIG&&window.BQ_CONFIG.api)||'').replace(/\/+$/,''), KEY_NAME='bq-sync-key', OFF_NAME='bq-sync-off', AUTO_NAME='bq-sync-auto';
+const S={state:'off',mode:'',ref:null,busy:false,dirty:false,lastPut:0,timer:0,remoteAt:0,
+  played:0,reached:false,autoBusy:false,autoAt:0,autoCancel:false,tell:false,calmT:0};
 const $=id=>document.getElementById(id);
 function note(t){ const el=$('cloudNote'); if(!el)return; el.hidden=!t; el.textContent=t||''; }
 /* give up on a read after ms. A page that was frozen (building the island, a backgrounded tab) wakes with the timer and the
@@ -76,7 +91,7 @@ async function start(){
     if(ref){ S.mode='claude'; return connect(ref); }         // signed out, or no identity for this viewer: fall through
     S.state='off';
   }
-  if(API){ S.mode='sync'; const k=storedKey(); if(k)return connect(httpRef(k)); }
+  if(API){ S.mode='sync'; const k=storedKey(); if(k){ S.tell=autoNew(); return connect(httpRef(k)); } }
 }
 /* read the cloud copy, let the newer of the two win, then mirror. Returns '' or an error code. */
 async function connect(ref){
@@ -105,15 +120,66 @@ async function connect(ref){
 const sync={
   get available(){ return !!API&&S.mode!=='claude'&&!(G.debug&&!/[?&]cloud(=|&|$)/.test(location.search)); },
   code(){ return fmtKey(storedKey()); },
-  async enable(){ let k=storedKey(); if(!k){ k=newKey(); try{ localStorage.setItem(KEY_NAME,k); }catch(_){ return {ok:false,why:'storage'}; } if(storedKey()!==k)return {ok:false,why:'storage'}; }
+  get off(){ try{ return !!localStorage.getItem(OFF_NAME); }catch(_){ return false; } },
+  async enable(){ clearOff(); if(S.autoBusy)S.autoCancel=true; let k=storedKey(); if(!k){ k=newKey(); try{ localStorage.setItem(KEY_NAME,k); }catch(_){ return {ok:false,why:'storage'}; } if(storedKey()!==k)return {ok:false,why:'storage'}; }
     S.mode='sync'; const err=await connect(httpRef(k)); return err?{ok:false,why:err,code:fmtKey(k)}:{ok:true,code:fmtKey(k)}; },
   async join(text){ const k=normKey(text); if(!k)return {ok:false,why:'format'};
     let snap; try{ snap=await wait(httpRef(k).get(),10000); }catch(e){ return {ok:false,why:(e&&e.code)||'unavailable'}; }
     if(!snap.exists)return {ok:false,why:'no_save'};        // nothing under that code: a typo, or the other device hasn't saved yet
     try{ localStorage.setItem(KEY_NAME,k); }catch(_){ return {ok:false,why:'storage'}; }
+    clearOff(); if(S.autoBusy)S.autoCancel=true;
     S.mode='sync'; const err=await connect(httpRef(k)); return err?{ok:false,why:err}:{ok:true,code:fmtKey(k)}; },
-  disable(){ try{ localStorage.removeItem(KEY_NAME); }catch(_){} clearTimeout(S.timer); S.timer=0; S.ref=null; S.state='off'; note(''); }
+  disable(){ try{ localStorage.removeItem(KEY_NAME); localStorage.setItem(OFF_NAME,'1'); }catch(_){}   // remembered: automatic backup stays off here
+    if(S.autoBusy)S.autoCancel=true; S.tell=false;
+    clearTimeout(S.timer); S.timer=0; S.ref=null; S.state='off'; note(''); },
+  auto:{ get after(){ return AUTO_AFTER; }, get played(){ return S.played; }, get trying(){ return S.autoBusy; } }
 };
+function clearOff(){ try{ localStorage.removeItem(OFF_NAME); }catch(_){} }
+
+/* ---- automatic backup: a device with no code starts on its own after AUTO_AFTER s of play (see the header) ---- */
+function autoOK(){
+  if(!sync.available||S.mode==='claude'||G.testSaves||G.debug)return false;
+  if(S.ref||S.autoBusy||S.state==='checking'||storedKey())return false;
+  try{ if(localStorage.getItem(OFF_NAME))return false;                       // the player turned it off on this device
+    localStorage.setItem(AUTO_NAME+'-probe','1'); localStorage.removeItem(AUTO_NAME+'-probe'); }
+  catch(_){ return false; }                                                  // no storage: nothing automatic
+  return true;
+}
+async function autoStart(){
+  if(!S.reached||!autoOK())return;
+  const raw=localRaw(), d=parse(raw); if(!d||raw.length>DOC_LIMIT)return;   // nothing to protect yet: the next save tries again
+  if(S.autoAt&&performance.now()-S.autoAt<AUTO_RETRY)return;
+  S.autoAt=performance.now(); S.autoBusy=true; S.autoCancel=false;
+  const k=newKey(), ref=httpRef(k);
+  let ok=false;
+  try{ await ref.set({v:1,at:d.at,objective:String(d.objective||'').slice(0,120),save:raw}); ok=true; }catch(_){}   // a brand-new code: nothing to read first
+  S.autoBusy=false;
+  if(!ok||S.autoCancel||storedKey()||sync.off||S.ref)return;               // failed (silently), or the player chose for themselves meanwhile
+  try{ localStorage.setItem(KEY_NAME,k); if(localStorage.getItem(AUTO_NAME)!=='told')localStorage.setItem(AUTO_NAME,'new'); }catch(_){}
+  if(storedKey()!==k)return;
+  S.mode='sync'; S.ref=ref; S.remoteAt=d.at; S.state='on';
+  note('Cloud saves are on. Your progress follows you '+where()+'.');
+  G.emit('cloud:saved',{at:d.at}); G.emit('cloud:auto',{});
+  S.tell=autoNew();
+  const now=parse(localRaw()); if(now&&now.at>d.at)schedule();            // saved again while the first upload was in flight
+}
+function autoNew(){ try{ return localStorage.getItem(AUTO_NAME)==='new'&&!!storedKey(); }catch(_){ return false; } }
+const TELL='Your progress is now also backed up online, anonymously. To carry on from another device, or to turn this off, open Sync devices on the title screen or in the pause menu.';
+/* the one-time line: a caption at a quiet moment (calm for 2 s, no caption showing or waiting), never a card */
+function tellWhenQuiet(dt){
+  const T=G.talk, cap=$('cap'), st=G.ui&&G.ui.captionStack?G.ui.captionStack():null;
+  const quietNow=(T&&T.calm?T.calm():true)&&!(cap&&cap.classList.contains('show'))&&!(st&&(st.depth||st.count));
+  S.calmT=quietNow?S.calmT+dt:0; if(S.calmT<2)return;
+  if(!autoNew()){ S.tell=false; return; }
+  S.tell=false; try{ localStorage.setItem(AUTO_NAME,'told'); }catch(_){}
+  if(G.ui&&G.ui.say)G.ui.say(TELL,'',{priority:'normal',key:'cloud:auto'});
+}
+if(API)G.system('cloudAuto',{order:96,modes:['play'],update(dt){
+  if(!(G.cine&&G.cine.on))S.played+=dt;                                      // play only: not the title, pause, cards or cut scenes
+  if(!S.reached&&S.played>=AUTO_AFTER){ S.reached=true; autoStart(); }
+  if(S.tell)tellWhenQuiet(dt);
+}});
+if(API)G.on('save:written',()=>{ if(S.reached)autoStart(); });
 
 /* one upload at a time; anything saved while one is in flight goes up next */
 async function put(){
