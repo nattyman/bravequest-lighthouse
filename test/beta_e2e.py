@@ -196,9 +196,9 @@ async def main():
             const o=G.ui.say; G.ui.say=function(t){ window.__said.push(String(t)); return o.apply(this,arguments); };
             setInterval(()=>{ if(G.cloud.sync.code()||G.cloud.state==='on')window.__claimed=true; },50); }"""
         TOLD = "() => window.__said.filter(t=>/backed up online/.test(t)).length"
-        async def play(sec):   # sec seconds of play time, in 1/10 s steps
-            await pg.evaluate("""async s => { G.headless.hold=true; let n=Math.round(s*10);
-                while(n>0){ const k=Math.min(n,100); G.step(1/10,k); n-=k; await new Promise(r=>setTimeout(r,0)); } }""", sec)
+        async def play(sec):   # sec seconds of play time as cloud.js counts it, in 1/10 s steps: cut scenes don't count (the opening shot after waking on the beach runs 14 s)
+            await pg.evaluate("""async s => { G.headless.hold=true; const A=G.cloud.sync.auto, goal=A.played+s-1e-6; let n=Math.round(s*10)+600;
+                while(A.played<goal&&n>0){ const k=Math.min(n,100,Math.max(1,Math.ceil((goal-A.played)*10))); G.step(1/10,k); n-=k; await new Promise(r=>setTimeout(r,0)); } }""", sec)
         AUTO = "() => ({played:(G.cloud.sync.auto||{}).played, state:G.cloud.state, key:localStorage.getItem('bq-sync-key'), off:localStorage.getItem('bq-sync-off'), told:localStorage.getItem('bq-sync-auto'), save:!!localStorage.getItem('bq-save-v1'), mode:G.state.mode})"
         auto = {}
 
@@ -298,8 +298,9 @@ async def main():
                 await play(61)    # the 45 s autosave has written a save by now, so the threshold tries at once
                 await pg.wait_for_function("!(G.cloud.sync.auto&&G.cloud.sync.auto.trying)", timeout=30000, polling=250); await pg.wait_for_timeout(500)
                 tries = fake.save_reqs - base
+                # silent about the outage: a badge toast from that minute of play (badges.js) is not about sync
                 r = await pg.evaluate("""() => ({key:localStorage.getItem('bq-sync-key'), state:G.cloud.state, note:document.getElementById('cloudNote').textContent,
-                    toast:document.getElementById('toast').textContent, said:window.__said.filter(t=>/reach|couldn|sync|online|error/i.test(t)), ok:G.flow.writeSave(), save:!!localStorage.getItem('bq-save-v1')})""")
+                    toast:(t=>/reach|couldn|sync|online|error|cloud|backup|backed/i.test(t)?t:'')(document.getElementById('toast').textContent), said:window.__said.filter(t=>/reach|couldn|sync|online|error/i.test(t)), ok:G.flow.writeSave(), save:!!localStorage.getItem('bq-save-v1')})""")
                 check('autoOutageSilent', tries >= 1 and not r['key'] and r['state'] == 'off' and not r['note'] and not r['toast'] and not r['said'] and r['ok'] and r['save'], dict(r, tries=tries))
                 await pg.wait_for_timeout(1500); tries2 = fake.save_reqs - base
                 await pg.evaluate("document.getElementById('pauseBtn').click()")

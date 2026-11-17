@@ -239,9 +239,16 @@ async def main():
             for _ in range(40):
                 if len(PUTS()) > n0: break
                 await pg.wait_for_timeout(250)
-            new = PUTS()[n0:]; named = [x for x in PUTS() if x['b'] and ('name' in x['b'])]
-            routine = [x for x in PUTS() if x['b'] and 'name' not in x['b'] and 'crew' not in x['b']]
+            new = PUTS()[n0:]
             check('routineUpload', len(new) >= 1 and new[0]['b'].get('splits', {}).get('lantern') == 700 and 'name' not in new[0]['b'] and 'crew' not in new[0]['b'], {'new': len(new)})
+            # a second routine upload of this step's own (whether the join step made one depends on when the page heard its first cloud save)
+            await pg.wait_for_timeout(1700); n1 = len(PUTS())
+            await pg.evaluate("G.board.push()")
+            for _ in range(120):
+                if len(PUTS()) > n1: break
+                await pg.wait_for_timeout(250)
+            named = [x for x in PUTS() if x['b'] and ('name' in x['b'])]
+            routine = [x for x in PUTS() if x['b'] and 'name' not in x['b'] and 'crew' not in x['b']]
             check('routineNeverNamed', len(routine) >= 2 and all('name' not in x['b'] for x in routine) and len(named) >= 3, {'routine': len(routine), 'named': len(named)})
         await step('routine', routine)
 
