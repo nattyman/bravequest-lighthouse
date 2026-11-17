@@ -27,6 +27,10 @@ class Fake:
             self.saves[key] = b; self.puts += 1; return await send(200, {'ok': True, 'at': b['at']})
         if path == '/v1/event' and rq.method == 'POST': self.events.append(json.loads(rq.post_data or '{}')); return await send(204)
         if path == '/v1/feedback' and rq.method == 'POST': self.feedback.append(json.loads(rq.post_data or '{}')); return await send(204)
+        # the Keepers' Board (js/board.js, covered by board_e2e.py): accepted here so its uploads are not "unknown" traffic
+        if path == '/v1/record' and rq.method == 'PUT': return await send(200, {'ok': True, 'name': ''}) if key in self.saves else await send(404, {'error': 'no_save'})
+        if path == '/v1/record' and rq.method == 'GET': return await send(404, {'error': 'no_record'})
+        if path == '/v1/board' and rq.method == 'GET': return await send(200, {'b': 'act1', 'crew': '', 'rows': []})
         self.other.append(rq.method + ' ' + path); await send(404, {'error': 'not_found'})
 
 async def main():
@@ -63,7 +67,7 @@ async def main():
             r = await pg.evaluate("""() => { const row=[...document.querySelectorAll('#title .bq-links button')].map(b=>b.textContent);
                 return {row, ver:(document.querySelector('#title .bq-ver')||{}).textContent, devtools:G.DEVTOOLS, debug:G.debug,
                         testTools:!!document.querySelector('[data-dt-open]'), sync:G.cloud.sync.available, state:G.cloud.state, mode:G.cloud.mode}; }""")
-            check('links', r['row'] == ['Sync devices', 'Send feedback'] and r['ver'] == '9.9.9-test' and r['sync'] and r['state'] == 'off', r)
+            check('links', r['row'] == ['Sync devices', 'Send feedback', 'Keepers’ Board'] and r['ver'] == '9.9.9-test' and r['sync'] and r['state'] == 'off', r)
             check('devtoolsOff', r['devtools'] is False and r['debug'] is False and not r['testTools'], r)
             await pg.keyboard.press('Backquote'); await pg.wait_for_timeout(300)
             r = await pg.evaluate("() => ({panel:!!document.querySelector('.dt-card:not([hidden]), #devtools:not([hidden])'), open:!!(G.devtools&&G.devtools.open)})")
@@ -90,6 +94,13 @@ async def main():
             check('upload', bool(sv) and sv['at'] == r['at'] and sv['v'] == 1 and isinstance(sv['save'], str) and len(sv['save']) > 100, {'puts': fake.puts, 'has': bool(sv), 'size': len(sv['save']) if sv else 0})
             ev = [e['name'] for e in fake.events]
             check('pings', 'session' in ev and 'play' in ev and all(e['build'] == '9.9.9-test' and re.match(r'^[a-z0-9]{8,24}$', e['sid']) and e['platform'] in ('touch', 'keyboard', 'pad', 'unknown') for e in fake.events), {'events': ev})
+            # the Keeper's Record: a milestone pings once (milestone:<id>); none in a quiet (test-save) session, none for a back-filled one
+            await pg.evaluate("""() => { G.record.debug.reach('plain-flame'); G.emit('record:milestone',{id:'plain-flame',t:1,restored:false});
+                G.emit('record:milestone',{id:'lantern',t:null,restored:true});
+                G.testSaves=true; G.record.debug.reach('stag'); G.testSaves=false; }""")
+            await pg.wait_for_timeout(1500)
+            ev = [e['name'] for e in fake.events]
+            check('milestonePing', ev.count('milestone:plain-flame') == 1 and 'milestone:stag' not in ev and 'milestone:lantern' not in ev, {'events': ev})
         await step('upload', upload)
 
         async def feedback():
@@ -105,7 +116,7 @@ async def main():
             r2 = await pg.evaluate("() => ({note:document.querySelector('#feedbackCard .savenote').textContent, text:document.querySelector('#feedbackCard textarea').value})")
             fb = fake.feedback[-1] if fake.feedback else {}
             check('typingIsNotGameInput', r1['text'] == 'nine men ran and jumped in the fog `m n' and r1['mode'] == 'paused' and not r1['map'] and 'Sound' not in r1['toast'], r1)
-            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Sync devices', 'Send feedback'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
+            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Sync devices', 'Send feedback', 'Keepers’ Board'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
             await pg.click('#feedbackCard button:has-text("Back")'); await pg.wait_for_timeout(200)
             r = await pg.evaluate("() => ({pause:!document.getElementById('pause').hidden, card:document.getElementById('feedbackCard').hidden})")
             check('feedbackBack', r['pause'] and r['card'], r)
@@ -185,9 +196,9 @@ async def main():
             const o=G.ui.say; G.ui.say=function(t){ window.__said.push(String(t)); return o.apply(this,arguments); };
             setInterval(()=>{ if(G.cloud.sync.code()||G.cloud.state==='on')window.__claimed=true; },50); }"""
         TOLD = "() => window.__said.filter(t=>/backed up online/.test(t)).length"
-        async def play(sec):   # sec seconds of play time, in 1/10 s steps
-            await pg.evaluate("""async s => { G.headless.hold=true; let n=Math.round(s*10);
-                while(n>0){ const k=Math.min(n,100); G.step(1/10,k); n-=k; await new Promise(r=>setTimeout(r,0)); } }""", sec)
+        async def play(sec):   # sec seconds of play time as cloud.js counts it, in 1/10 s steps: cut scenes don't count (the opening shot after waking on the beach runs 14 s)
+            await pg.evaluate("""async s => { G.headless.hold=true; const A=G.cloud.sync.auto, goal=A.played+s-1e-6; let n=Math.round(s*10)+600;
+                while(A.played<goal&&n>0){ const k=Math.min(n,100,Math.max(1,Math.ceil((goal-A.played)*10))); G.step(1/10,k); n-=k; await new Promise(r=>setTimeout(r,0)); } }""", sec)
         AUTO = "() => ({played:(G.cloud.sync.auto||{}).played, state:G.cloud.state, key:localStorage.getItem('bq-sync-key'), off:localStorage.getItem('bq-sync-off'), told:localStorage.getItem('bq-sync-auto'), save:!!localStorage.getItem('bq-save-v1'), mode:G.state.mode})"
         auto = {}
 
@@ -287,8 +298,9 @@ async def main():
                 await play(61)    # the 45 s autosave has written a save by now, so the threshold tries at once
                 await pg.wait_for_function("!(G.cloud.sync.auto&&G.cloud.sync.auto.trying)", timeout=30000, polling=250); await pg.wait_for_timeout(500)
                 tries = fake.save_reqs - base
+                # silent about the outage: a badge toast from that minute of play (badges.js) is not about sync
                 r = await pg.evaluate("""() => ({key:localStorage.getItem('bq-sync-key'), state:G.cloud.state, note:document.getElementById('cloudNote').textContent,
-                    toast:document.getElementById('toast').textContent, said:window.__said.filter(t=>/reach|couldn|sync|online|error/i.test(t)), ok:G.flow.writeSave(), save:!!localStorage.getItem('bq-save-v1')})""")
+                    toast:(t=>/reach|couldn|sync|online|error|cloud|backup|backed/i.test(t)?t:'')(document.getElementById('toast').textContent), said:window.__said.filter(t=>/reach|couldn|sync|online|error/i.test(t)), ok:G.flow.writeSave(), save:!!localStorage.getItem('bq-save-v1')})""")
                 check('autoOutageSilent', tries >= 1 and not r['key'] and r['state'] == 'off' and not r['note'] and not r['toast'] and not r['said'] and r['ok'] and r['save'], dict(r, tries=tries))
                 await pg.wait_for_timeout(1500); tries2 = fake.save_reqs - base
                 await pg.evaluate("document.getElementById('pauseBtn').click()")

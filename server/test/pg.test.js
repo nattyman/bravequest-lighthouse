@@ -50,11 +50,31 @@ if (!url) {
     assert.ok(idx.rows.some((r) => /\(name, created_at\)/.test(r.indexdef)));
   });
 
+  test('postgres store: records schema matches the spec', async () => {
+    const { rows } = await store._pool.query(
+      `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'records' ORDER BY ordinal_position`,
+    );
+    assert.deepEqual(rows.map((r) => `${r.column_name}:${r.data_type}:${r.is_nullable}`), [
+      'id:text:NO', 'name:text:NO', 'name_key:text:NO', 'crew:text:NO', 'build:text:NO',
+      'play:integer:NO', 'deaths:integer:NO', 'pct:smallint:NO', 'badges:smallint:NO', 'rank:smallint:NO',
+      'days:smallint:NO', 'act1:integer:YES', 'full_run:integer:YES', 'full_deaths:integer:YES',
+      'splits:jsonb:NO', 'bosses:jsonb:NO', 'hidden:boolean:NO',
+      'created_at:timestamp with time zone:NO', 'updated_at:timestamp with time zone:NO',
+    ]);
+    const idx = await store._pool.query(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'records'`,
+    );
+    const nameIdx = idx.rows.find((r) => r.indexname === 'records_name_key_idx');
+    assert.ok(nameIdx && /UNIQUE/.test(nameIdx.indexdef) && /WHERE/.test(nameIdx.indexdef));
+  });
+
   runStoreContract('postgres store', () => store, {
     events: async (sid) =>
       (await store._pool.query('SELECT name, build, platform, sid, created_at AS "createdAt" FROM events WHERE sid = $1', [sid])).rows,
     feedback: async (build) =>
       (await store._pool.query('SELECT text, build, platform, progress, contact, created_at AS "createdAt" FROM feedback WHERE build = $1', [build])).rows,
+    hide: async (id) => { await store._pool.query('UPDATE records SET hidden = true WHERE id = $1', [id]); },
   });
 
   test('postgres store: updated_at moves on update', async () => {
@@ -86,6 +106,22 @@ if (!url) {
       // The raw key is never stored: the row id is its sha256.
       const ids = await store._pool.query('SELECT 1 FROM saves WHERE id = $1 OR body LIKE $2', [key, `%${key}%`]);
       assert.equal(ids.rows.length, 0);
+      // Records and boards over HTTP.
+      const name = 'Pg ' + Math.random().toString(36).slice(2, 10);
+      const crew = 'PG' + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const rec = { name, crew, build: 'b', play: 2000, deaths: 1, pct: 30, badges: 2, rank: 1, days: 1,
+        splits: { ashore: 10, gloaming: 1500 }, bosses: { stag: 30 } };
+      const put2 = await fetch(`${s.url}/v1/record`, { method: 'PUT', headers: { Authorization: `Bearer ${key}` }, body: JSON.stringify(rec) });
+      assert.equal(put2.status, 200);
+      assert.deepEqual(await put2.json(), { ok: true, name });
+      const mine = await (await fetch(`${s.url}/v1/record`, { headers: { Authorization: `Bearer ${key}` } })).json();
+      assert.equal(mine.name, name);
+      assert.equal(mine.act1, 1500);
+      const board = await (await fetch(`${s.url}/v1/board?b=act1&crew=${crew}`, { headers: { Authorization: `Bearer ${key}` } })).json();
+      assert.deepEqual(board.rows.map((r) => [r.pos, r.name, r.value]), [[1, name, 1500]]);
+      assert.deepEqual(board.you, { pos: 1, value: 1500 });
+      const ids2 = await store._pool.query('SELECT 1 FROM records WHERE id = $1', [key]);
+      assert.equal(ids2.rows.length, 0);
     } finally {
       await s.close();
     }

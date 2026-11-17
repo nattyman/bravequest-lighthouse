@@ -17,7 +17,7 @@ js/flow.js        quest beats, checkpoints, pickups, title/attract camera  (lead
 js/hud.js         HUD, menus, touch buttons  (lead)
 vendor/three      local Three.js r128 + examples/js (for dev.html only)
 ```
-Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → cloud → `G.start()`.
+Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → … → the north modules → record → badges → cloud → beta → `G.start()`.
 Every module is a plain script wrapped in an IIFE: `(function(){ 'use strict'; const G=window.G, THREE=G.THREE; ... })();`
 Three.js is **r128** (UMD global). No ES modules, no imports, no other libraries, no network assets. All textures are procedural (canvas) — see `G.canvasTex`.
 
@@ -103,6 +103,15 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   the cave raft, with monsters hunting you within 30 m, mid-air, and to a destination under the fog.
 - Input actions: `forward back left right jump sprint roll attack lock interact shutter potion pause advance glass fox raven` (advance = Enter or controller D-pad down: next caption; glass = hold G, or hold Y on a controller once the Remembering Glass is owned — a Y tap stays interact, sent on release; touch: the Glass button; fox = R / D-pad left / the fox touch button, raven = T / D-pad right / the raven touch button — companions.js, shown once each companion is earned). The D-pad no longer walks. `G.input.down(a)`, `G.input.pressed(a)`, `G.input.released(a)`, `G.input.move()` → {x,y,mag}, `G.input.gamepad` → `{connected,id,name,blocked,error,policy,supported,count,index,mapping,remap}` (policy false = the page's permissions policy forbids 'gamepad'; remap 'xpad'|'generic' for a pad without the standard mapping), `G.input.padState()` → the pad in use in the standard layout `{B,A}` or null, `G.input.look()` → pixel delta this frame, `G.input.wheel`, `G.input.locked`.
 - Techniques (`js/combat.js`, loaded before player.js): `G.moves.T` is the tuning table (lunge, sweep, slam, spin, plunge, dive, doubleJump, buffer, aim). `G.moves.performed(id)` names a technique on screen (toast the first time; remembered in localStorage `bq-combos`, listed in the pause menu). `G.moves.raycast(from,dir,max,{start})` → `{point,dist,hb,surface}` against floors, walls (constrainers), colliders, cave ceilings and enemy hurtboxes. `G.moves.burst(pos,{radius,color,life,lightI})` ether ring + flash. `G.moves.noDoubleJump.push(fn(pos)->bool)` forbids the double jump where it returns true. `G.player.move` → `{id, phase, doubleJumped, dived, aiming, aimK, aimPoint, cooldowns}`.
+- The Keeper's Record (js/record.js; spec RECORD.md): `G.record = {state, MILESTONES, BOSSES, play(), ms(id), split(id), best(id), boss(id),
+  completion() → {done,total,pct,parts}, summary(), fmt(s), attempt, debug}` — play time, counters, milestone times and boss attempts, in the save
+  (persist key `record`). Badges and rank (js/badges.js): `G.badges = {list() → [{id,cat,name,desc,hint,hidden,got,shown}], has(id), count(), total(),
+  nearest() → {id,name,text}|null, rank() → {i,name,next:{name,need}|null}, RANKS, debug}` (persist key `badges`). Both may be missing: guard every use.
+- Journal (progression.js): tabs "What you carry" / Record / Badges (`G.progress.journal.tab(t)`; LB / RB or ◀ ▶ switch tabs, the right stick
+  scrolls; no Badges tab without `G.badges`). Welcome back: Continue after 12 h away (the save's `record.last`) shows one card before play
+  (`G.progress.welcome` = `{due(save), show(save), close(), open, enabled, allowInTests}`; setting in the pause menu, localStorage `bq-welcome`);
+  never in `?debug` / headless / test-save sessions unless a test sets `allowInTests`. The title's Continue card shows rank · time played ·
+  completion from the stored save (`rec` in the save, written by flow.js's snapshot).
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
 
 ## Events (names are fixed)
@@ -140,6 +149,10 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `companion:heel` / `companion:caw` | {} / {why:'warn'\|'cooldown'} | companions |
 | `companion:nip` / `companion:dive` | {kind, interrupted} / {kind, delayed} | companions (the small fight help) |
 | `companion:dodge` | {id} | companions (a blow would have landed: they hop / flap aside) |
+| `record:milestone` | {id, t, restored} | record (first reach of a milestone; restored = back-filled from an old save, t null) |
+| `record:boss` / `record:change` / `record:newgame` | {id,win,time,hurt,draughts,tries} / {} / {run} | record |
+| `badge:earned` / `rank:up` | {id, name, restored} / {i, name} | badges |
+| `journal:tab` / `welcome:open` / `welcome:close` | {tab} / {} / {} | progression (the Journal's tabs, the welcome-back card) |
 
 ## Module briefs (who owns what)
 **world.js** — `G.world.height/walkable/landmarks` (synchronous), terrain mesh(es) with vertex colours (cel-shaded), sea (animated), sky dome (dusk gradient + moon + stars faint), fog, sea stacks, forest (instanced trunks/canopies; colliders for trunks), moor heath + wildflowers, local grass that follows `G.focus` for density, rocks, ruined hamlet, standing stones, stone walls, keeper's cottage + shed with warm windows, the cliff-path ramp, the Resisting Tree, path rendering, mushrooms visuals, atmosphere application (reads `G.atmo`), hemi/sun colours. Registers colliders for trees, rocks, buildings.
