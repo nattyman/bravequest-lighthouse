@@ -14,7 +14,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function buildStore() {
   if (!databaseUrl) {
     console.warn(
-      'WARNING: DATABASE_URL is not set. Using the in-memory store: saves, events and ' +
+      'WARNING: DATABASE_URL is not set. Using the in-memory store: saves, events, records and ' +
         'feedback are NOT persistent and are lost when this process stops.',
     );
     return createMemoryStore();

@@ -5,6 +5,7 @@
 
 import { createHash } from 'node:crypto';
 import { isIPv6 } from 'node:net';
+import { parseBoardQuery, validateRecord } from './records.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -15,10 +16,11 @@ export const DEFAULT_LIMITS = Object.freeze({
   feedback: { max: 5, windowMs: HOUR },
   failedLookups: { max: 30, windowMs: HOUR }, // GET /v1/save answering 404
   newSaves: { max: 10, windowMs: HOUR }, // brand-new save ids
+  boards: { max: 30, windowMs: MINUTE }, // GET /v1/board + GET /v1/record combined
 });
 
 const MAX_SAVE_BODY_BYTES = 300 * 1024;
-const MAX_SMALL_BODY_BYTES = 32 * 1024; // events and feedback
+const MAX_SMALL_BODY_BYTES = 32 * 1024; // events, feedback and records
 const MAX_SAVE_CHARS = 245_760;
 const MAX_OBJECTIVE_CHARS = 120;
 
@@ -32,6 +34,8 @@ const ROUTES = {
   '/v1/save': ['GET', 'PUT'],
   '/v1/event': ['POST'],
   '/v1/feedback': ['POST'],
+  '/v1/record': ['GET', 'PUT'],
+  '/v1/board': ['GET'],
 };
 
 // ---------------------------------------------------------------------------
@@ -436,7 +440,53 @@ export function createApp({ store, config = {} }) {
     return send(res, 204);
   }
 
-  async function route(req, res, path) {
+  // PUT /v1/record shares the events budget (the game sends it alongside its progress pings).
+  async function putRecord(req, res, ip) {
+    const verdict = limits.events.take(ip);
+    if (!verdict.ok) return limited(res, verdict);
+    const key = keyFromRequest(req);
+    if (!key) return send(res, 401, { error: 'bad_key' });
+    const raw = await readBody(req, MAX_SMALL_BODY_BYTES);
+    if (raw === TOO_LARGE) return tooLarge(res);
+    const checked = validateRecord(parseJsonObject(raw));
+    if (checked.error) return send(res, 400, { error: checked.error });
+    const result = await store.putRecord(saveIdForKey(key), checked.record);
+    if (result.status === 'ok') return send(res, 200, { ok: true, name: result.name });
+    if (result.status === 'name_taken') return send(res, 409, { error: 'name_taken' });
+    return send(res, 404, { error: 'no_save' });
+  }
+
+  async function getRecord(req, res, ip) {
+    let verdict = limits.boards.take(ip);
+    if (!verdict.ok) return limited(res, verdict);
+    const key = keyFromRequest(req);
+    if (!key) return send(res, 401, { error: 'bad_key' });
+    // An address already locked out for guessing save codes is locked out here too.
+    verdict = limits.failedLookups.check(ip);
+    if (!verdict.ok) return limited(res, verdict);
+    const row = await store.getRecord(saveIdForKey(key));
+    if (!row) return send(res, 404, { error: 'no_record' });
+    return send(res, 200, row);
+  }
+
+  async function getBoard(req, res, ip, query) {
+    const verdict = limits.boards.take(ip);
+    if (!verdict.ok) return limited(res, verdict);
+    let youId;
+    if (req.headers.authorization !== undefined) {
+      const key = keyFromRequest(req);
+      if (!key) return send(res, 401, { error: 'bad_key' });
+      youId = saveIdForKey(key);
+    }
+    const q = parseBoardQuery(new URLSearchParams(query));
+    if (!q) return send(res, 400, { error: 'bad_request' });
+    const result = await store.board({ ...q, youId });
+    const payload = { b: q.board === 'boss' ? `boss:${q.boss}` : q.board, crew: q.crew, rows: result.rows };
+    if (youId !== undefined) payload.you = result.you ?? null;
+    return send(res, 200, payload);
+  }
+
+  async function route(req, res, path, query) {
     const method = req.method;
     const allowed = ROUTES[path];
     const origin = req.headers.origin;
@@ -462,20 +512,27 @@ export function createApp({ store, config = {} }) {
     if (path === '/health') return health(res);
     const ip = ipBucket(clientIp(req, trustProxy));
     if (path === '/v1/save') return method === 'GET' ? getSave(req, res, ip) : putSave(req, res, ip);
+    if (path === '/v1/record') return method === 'GET' ? getRecord(req, res, ip) : putRecord(req, res, ip);
+    if (path === '/v1/board') return getBoard(req, res, ip, query);
     if (path === '/v1/event') return postEvent(req, res, ip);
     return postFeedback(req, res, ip);
   }
 
   function handler(req, res) {
     const started = now();
-    const rawPath = String(req.url || '/').split('?')[0];
+    const rawUrl = String(req.url || '/');
+    const q = rawUrl.indexOf('?');
+    const rawPath = q < 0 ? rawUrl : rawUrl.slice(0, q);
+    const rawQuery = q < 0 ? '' : rawUrl.slice(q + 1, q + 1 + 1000);
     res.on('finish', () => {
       // Path only (never the query string), trimmed and stripped of control characters.
       const shown = rawPath.slice(0, 120).replace(/[^\x21-\x7e]/g, '?');
       log(`${req.method} ${shown} ${res.statusCode} ${now() - started}ms`);
     });
-    route(req, res, rawPath).catch((err) => {
-      if (res.headersSent || res.destroyed || req.destroyed) {
+    route(req, res, rawPath, rawQuery).catch((err) => {
+      // req.destroyed is not a sign the client left: node destroys the request stream once its
+      // body has been read. Check the socket instead.
+      if (res.headersSent || res.destroyed || req.socket?.destroyed) {
         if (!res.writableEnded) res.destroy();
         return;
       }
