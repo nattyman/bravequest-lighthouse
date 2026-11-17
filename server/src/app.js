@@ -498,6 +498,7 @@ export function createApp({ store, config = {} }) {
         res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
         res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
         res.setHeader('Access-Control-Max-Age', '86400');
+        res.setHeader('Access-Control-Expose-Headers', 'Retry-After'); // so the game can read how long to wait after a 429
       } else if (path !== '/health') {
         return send(res, 403, { error: 'origin_not_allowed' }, { Vary: 'Origin' });
       }

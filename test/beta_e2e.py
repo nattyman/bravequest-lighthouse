@@ -27,6 +27,10 @@ class Fake:
             self.saves[key] = b; self.puts += 1; return await send(200, {'ok': True, 'at': b['at']})
         if path == '/v1/event' and rq.method == 'POST': self.events.append(json.loads(rq.post_data or '{}')); return await send(204)
         if path == '/v1/feedback' and rq.method == 'POST': self.feedback.append(json.loads(rq.post_data or '{}')); return await send(204)
+        # the Keepers' Board (js/board.js, covered by board_e2e.py): accepted here so its uploads are not "unknown" traffic
+        if path == '/v1/record' and rq.method == 'PUT': return await send(200, {'ok': True, 'name': ''}) if key in self.saves else await send(404, {'error': 'no_save'})
+        if path == '/v1/record' and rq.method == 'GET': return await send(404, {'error': 'no_record'})
+        if path == '/v1/board' and rq.method == 'GET': return await send(200, {'b': 'act1', 'crew': '', 'rows': []})
         self.other.append(rq.method + ' ' + path); await send(404, {'error': 'not_found'})
 
 async def main():
@@ -63,7 +67,7 @@ async def main():
             r = await pg.evaluate("""() => { const row=[...document.querySelectorAll('#title .bq-links button')].map(b=>b.textContent);
                 return {row, ver:(document.querySelector('#title .bq-ver')||{}).textContent, devtools:G.DEVTOOLS, debug:G.debug,
                         testTools:!!document.querySelector('[data-dt-open]'), sync:G.cloud.sync.available, state:G.cloud.state, mode:G.cloud.mode}; }""")
-            check('links', r['row'] == ['Sync devices', 'Send feedback'] and r['ver'] == '9.9.9-test' and r['sync'] and r['state'] == 'off', r)
+            check('links', r['row'] == ['Sync devices', 'Send feedback', 'Keepers’ Board'] and r['ver'] == '9.9.9-test' and r['sync'] and r['state'] == 'off', r)
             check('devtoolsOff', r['devtools'] is False and r['debug'] is False and not r['testTools'], r)
             await pg.keyboard.press('Backquote'); await pg.wait_for_timeout(300)
             r = await pg.evaluate("() => ({panel:!!document.querySelector('.dt-card:not([hidden]), #devtools:not([hidden])'), open:!!(G.devtools&&G.devtools.open)})")
@@ -112,7 +116,7 @@ async def main():
             r2 = await pg.evaluate("() => ({note:document.querySelector('#feedbackCard .savenote').textContent, text:document.querySelector('#feedbackCard textarea').value})")
             fb = fake.feedback[-1] if fake.feedback else {}
             check('typingIsNotGameInput', r1['text'] == 'nine men ran and jumped in the fog `m n' and r1['mode'] == 'paused' and not r1['map'] and 'Sound' not in r1['toast'], r1)
-            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Sync devices', 'Send feedback'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
+            check('feedback', r0['mode'] == 'paused' and r0['link'] == ['Sync devices', 'Send feedback', 'Keepers’ Board'] and fb.get('text') == 'nine men ran and jumped in the fog `m n' and fb.get('build') == '9.9.9-test' and bool(fb.get('progress')) and 'Sent' in r2['note'] and r2['text'] == '', {'fb': fb, 'note': r2['note']})
             await pg.click('#feedbackCard button:has-text("Back")'); await pg.wait_for_timeout(200)
             r = await pg.evaluate("() => ({pause:!document.getElementById('pause').hidden, card:document.getElementById('feedbackCard').hidden})")
             check('feedbackBack', r['pause'] and r['card'], r)

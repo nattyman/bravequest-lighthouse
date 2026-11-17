@@ -339,6 +339,7 @@ describe('CORS', () => {
       assert.equal(res.headers.get('access-control-allow-headers'), 'Authorization, Content-Type');
       assert.equal(res.headers.get('access-control-allow-methods'), 'GET, PUT, POST, OPTIONS');
       assert.equal(res.headers.get('access-control-max-age'), '86400');
+      assert.equal(res.headers.get('access-control-expose-headers'), 'Retry-After');
     }
   });
 
