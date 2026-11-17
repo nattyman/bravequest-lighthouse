@@ -3,11 +3,21 @@
 
 import { isBlockedName } from './blocked-words.js';
 
-/** Milestone ids, in the order the game reaches them. Splits must not decrease in this order. */
+/** Milestone ids, in the order the Record lists them. Play order varies in places (see AFTER). */
 export const MILESTONES = Object.freeze([
   'ashore', 'plain-flame', 'stag', 'lantern', 'staff', 'lamp-cured',
   'gloaming', 'undertow', 'crane', 'answer', 'sailed', 'giant',
 ]);
+/**
+ * The order the story forces: each milestone cannot be reached before the ones listed for it.
+ * Anything not listed is free (the staff can come before or after the plain flame fails; the
+ * dungeons after Act 1 can be done in any order), so only these pairs are checked.
+ */
+export const AFTER = Object.freeze({
+  'plain-flame': ['ashore'], staff: ['ashore'], stag: ['ashore'], lantern: ['stag'],
+  'lamp-cured': ['lantern'], gloaming: ['lamp-cured'],
+  undertow: ['gloaming'], crane: ['gloaming'], answer: ['gloaming'], sailed: ['gloaming'], giant: ['sailed'],
+});
 export const BOSSES = Object.freeze(['stag', 'gloaming', 'undertow', 'crane', 'answer', 'giant']);
 
 /** The milestone that ends each timed board. */
@@ -84,13 +94,17 @@ export function validateRecord(body) {
     if (!isCount(t, body.play)) return bad; // no milestone after the play time that is being reported
     splits[id] = t;
   }
-  let last = -1;
-  for (const id of MILESTONES) {
-    const t = splits[id];
-    if (typeof t !== 'number') continue;
-    if (t < last) return bad;
-    last = t;
-  }
+  // A milestone cannot be timed before one the story puts ahead of it (through any untimed ones between).
+  const floorOf = (id, seen = new Set()) => {
+    let most = -1;
+    for (const before of AFTER[id] || []) {
+      if (seen.has(before)) continue;
+      seen.add(before);
+      most = Math.max(most, typeof splits[before] === 'number' ? splits[before] : floorOf(before, seen));
+    }
+    return most;
+  };
+  for (const id of MILESTONES) if (typeof splits[id] === 'number' && splits[id] < floorOf(id)) return bad;
   const act1 = typeof splits[ACT1_MILESTONE] === 'number' ? splits[ACT1_MILESTONE] : null;
   const full = typeof splits[FULL_MILESTONE] === 'number' ? splits[FULL_MILESTONE] : null;
   if (act1 !== null && act1 < FLOORS.act1) return bad;

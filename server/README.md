@@ -69,8 +69,9 @@ the name is the username):
   0..1000, `rank` 0..20, `days` 0..10 000, all integers.
 - `splits`: keys are milestone ids, in order `ashore, plain-flame, stag, lantern, staff, lamp-cured,
   gloaming, undertow, crane, answer, sailed, giant`. Values are integers 0..`play`, or `null` for a
-  milestone reached without a time (it is stored but skipped by the checks below). The times must not
-  decrease in milestone order. The `gloaming` time is the Act 1 time and must be at least 300 s; the
+  milestone reached without a time (it is stored but skipped by the checks below). A time must not
+  be earlier than a milestone the story puts ahead of it (the lantern after the Stag, the dungeons after
+  the Gloaming, the giant after sailing); where the story leaves the order open, any order is accepted. The `gloaming` time is the Act 1 time and must be at least 300 s; the
   `giant` time is the full-game time and must be at least 1200 s.
 - `bosses`: keys are `stag, gloaming, undertow, crane, answer, giant`; values integers of at least 10 s
   (`null` = no win yet, ignored).

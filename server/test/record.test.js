@@ -278,18 +278,25 @@ describe('records: validation', () => {
     assert.equal(got.extra, undefined);
   });
 
-  test('splits must not decrease in milestone order; null (time unknown) is skipped', async () => {
+  test('a split cannot come before a milestone the story puts ahead of it; null (time unknown) is skipped', async () => {
     const key = await player(s);
     const dec = await putRecord(s.url, key, validRecord({ splits: { ashore: 100, 'plain-flame': 99 } }));
     assert.equal(dec.status, 400);
-    // Order of the object keys does not matter, only milestone order.
+    // Order of the object keys does not matter, only story order.
     assert.equal((await putRecord(s.url, key, validRecord({ splits: { stag: 600, ashore: 20 } }))).status, 200);
     assert.equal((await putRecord(s.url, key, validRecord({ splits: { stag: 20, ashore: 600 } }))).status, 400);
     // Equal is fine.
     assert.equal((await putRecord(s.url, key, validRecord({ splits: { ashore: 50, 'plain-flame': 50 } }))).status, 200);
     // Restored milestones have no time; they neither break the order nor set a best.
-    const res = await putRecord(s.url, key, validRecord({ splits: { ashore: null, stag: 900, lantern: null, staff: 100 } }));
-    assert.equal(res.status, 400); // staff (100) is before stag (900)
+    const res = await putRecord(s.url, key, validRecord({ splits: { ashore: null, stag: 900, lantern: null, 'lamp-cured': 100 } }));
+    assert.equal(res.status, 400); // the lamp (100) cannot be cured before the Stag (900), even with the lantern untimed
+    const other = await player(s);
+    // Where the story leaves the order open, either order is accepted.
+    assert.equal((await putRecord(s.url, other, validRecord({ splits: { ashore: 10, staff: 100, 'plain-flame': 300, stag: 900 } }))).status, 200);
+    assert.equal((await putRecord(s.url, other, validRecord({ splits: { ashore: 10, 'plain-flame': 100, staff: 300, stag: 200 } }))).status, 200);
+    const late = { ashore: 10, stag: 200, lantern: 250, 'lamp-cured': 300, gloaming: 400 };
+    assert.equal((await putRecord(s.url, other, validRecord({ splits: { ...late, answer: 500, crane: 600, undertow: 700 } }))).status, 200);
+    assert.equal((await putRecord(s.url, other, validRecord({ splits: { ...late, answer: 399 } }))).status, 400);
     assert.equal((await putRecord(s.url, key, validRecord({ splits: { ashore: null, stag: 100, lantern: null, gloaming: null } }))).status, 200);
     const got = await (await getRecord(s.url, key)).json();
     assert.deepEqual(got.splits, { ashore: null, stag: 100, lantern: null, gloaming: null });
