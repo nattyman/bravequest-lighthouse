@@ -1,6 +1,6 @@
 # Builds the public beta: a self-contained dist/ folder (and a zip of it for itch.io) that makes no request to
 # any CDN. Everything the page loads is in the folder: the game modules, Three.js from vendor/, the fonts from
-# vendor/fonts/, the music and the sound effects.
+# vendor/fonts/, the music, the sound effects and the icons (icons/, manifest.webmanifest).
 #
 #   python3 test/build_release.py --api https://bravequest-api.saturnsites.com
 #   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://nattyman.github.io/bravequest-lighthouse-3d/
@@ -68,7 +68,14 @@ meta = ['<meta charset="utf-8">',
         '<meta property="og:title" content="Brave Quest: Lighthouse">',
         '<meta property="og:description" content="' + desc + '">',
         '<meta property="og:type" content="website">',
-        '<link rel="stylesheet" href="vendor/fonts/fonts.css">']
+        '<link rel="stylesheet" href="vendor/fonts/fonts.css">',
+        # the lantern icon: browser tab, bookmarks, and the home-screen icon on phones (iOS reads apple-touch-icon,
+        # not the favicon; Android reads the manifest)
+        '<link rel="icon" href="icons/favicon.ico" sizes="48x48">',
+        '<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">',
+        '<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">',
+        '<link rel="manifest" href="manifest.webmanifest">',
+        '<meta name="apple-mobile-web-app-title" content="Lighthouse">']
 if a.direct: meta.append('<meta property="og:url" content="' + a.direct + '">')
 doc = '<!doctype html>\n<html lang="en">\n<head>\n' + '\n'.join(meta) + '\n' + head + '\n</head>\n<body>\n' + body.strip() + '\n</body>\n</html>\n'
 
@@ -85,9 +92,10 @@ os.makedirs(out)
 open(os.path.join(out, '.bq-release'), 'w').write(version + '\n')
 open(os.path.join(out, 'index.html'), 'w', encoding='utf-8').write(doc)
 files = listed + re.findall(r'<script src="(vendor/[^"]+)"></script>', doc)
-for d in ('audio', 'sfx', os.path.join('vendor', 'fonts')):
+for d in ('audio', 'sfx', 'icons', os.path.join('vendor', 'fonts')):
     for dp, _, fs in os.walk(os.path.join(root, d)):
         files += [os.path.relpath(os.path.join(dp, f), root) for f in fs if not f.startswith('.')]
+files.append('manifest.webmanifest')
 files.append(os.path.join('vendor', 'three', 'LICENSE'))   # Three.js is MIT: its licence text travels with it
 for f in files:
     src = os.path.join(root, f)
