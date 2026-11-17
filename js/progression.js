@@ -8,10 +8,13 @@
    - "Temper" tab on the keeper's benches (alchemy panel): 7 upgrades with real effects
    - G.progress.reward({id,name,desc,icon,eyebrow,item}): the shared "get item" moment (queued, never stacks)
    - the Journal (pause menu), persistence ('progress') with retroactive grants for old saves
+   - the Journal's Record and Badges tabs and the welcome-back card on Continue (spec: RECORD.md, section 3), drawn from
+     G.record and G.badges when they are loaded (without G.badges: no rank, no Badges tab)
    Effects go through small hook points owned by other modules:
      G.player.mods {dmg, cost, stamMax, charge, boltSpeed, pierce, baitTime, mothGather} (player.js, moths.js, creatures.js),
      G.potions.N.max/heal (potions.js), G.moths.jar.capacity (moths.js), G.player.camPull (player.js camera).
-   API: G.progress = {reward, state, maxHp(), marks, buy(id), owns(id), UPGRADES, spots, caches, journal:{open,close}, debug}
+   API: G.progress = {reward, state, maxHp(), marks, buy(id), owns(id), UPGRADES, spots, caches, journal:{open,close,tab(t)},
+        welcome:{due(save), show(save), close(), open, enabled, allowInTests}, debug}
    Events: progress:shard {n,total} · progress:heart {src} · progress:wing {n} · progress:mark {n,src} · progress:cache {id}
            progress:upgrade {id} · progress:reward {id}
    ===================================================================== */
@@ -631,6 +634,61 @@ const CSS=`
 .jr-list span svg{width:16px;height:16px}
 .jr-list span:not(.on) svg{opacity:.35}
 #journal .eyebrow.sec{margin-bottom:-6px}
+/* Journal tabs (the pause menu's tab look) and the Record / Badges pages */
+#journal .jr-tabs{margin:-10px 0 -4px;align-items:flex-end}
+#journal .jr-tabs button[hidden]{display:none}
+.jr-tabkeys{margin-left:auto;align-self:center;display:inline-flex;gap:4px}
+.jr-tabkeys:empty{display:none}
+.jr-rank{font-size:23px!important}
+.jr-cell .s b{font-weight:700;color:#4b3863}
+.jr-parts span{color:#5a4a4e}.jr-parts span b{font-variant-numeric:tabular-nums;margin-left:2px}
+.jr-mss{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid rgba(60,40,30,.2)}
+.jr-ms{display:grid;grid-template-columns:minmax(0,1fr) 84px 84px;align-items:baseline;gap:2px 12px;padding:7px 4px;border-bottom:1px solid rgba(60,40,30,.13)}
+.jr-mss:has(.best) .jr-ms{grid-template-columns:minmax(0,1fr) 84px 84px 84px}
+.jr-ms b{font:400 17.5px/1.2 var(--serif);color:#21161f;min-width:0}
+.jr-ms span{font:600 14.5px var(--body);color:#3d2f33;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.jr-ms span small{display:block;font:700 9.5px var(--body);letter-spacing:.16em;text-transform:uppercase;color:#8a7a80;margin-bottom:1px}
+.jr-ms span.best{color:#6c3f5f}
+.jr-ahead{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 4px;border-bottom:1px solid rgba(60,40,30,.13)}
+.jr-dot{display:inline-grid;place-items:center;width:30px;height:20px;padding:0;border:1px dashed rgba(60,40,30,.3);border-radius:3px;font:600 13px/1 var(--body);color:#a3959c;text-align:center;letter-spacing:.1em}
+.jr-ahead em{margin-left:4px;font:italic 15px var(--serif);color:#7a6a70}
+#journalRecord,#journalBadges{display:grid;gap:12px;min-width:0}
+#journalRecord .jr-cell,#wbStats .jr-cell{align-content:start}
+body:has(#journal:not([hidden])) #pauseBtn,body:has(#welcomeBack:not([hidden])) #pauseBtn{visibility:hidden}
+.jr-tally{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.jr-tally span{display:grid;gap:1px;padding:8px 10px;border-radius:3px;background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(60,40,30,.14);font:600 11px var(--body);letter-spacing:.12em;text-transform:uppercase;color:#6c3f5f}
+.jr-tally b{font:400 24px/1 var(--display);letter-spacing:0;text-transform:none;color:#21161f;font-variant-numeric:tabular-nums}
+.jr-bcount{font-size:15px!important;color:#5a4a4e!important;margin:-4px 0 0!important}
+.jr-bcount b{font:400 26px var(--display);color:#21161f;margin-right:3px}
+.jr-badges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.jr-badge{display:grid;grid-template-columns:40px minmax(0,1fr);gap:10px;align-items:start;padding:9px 11px;border-radius:3px;background:rgba(40,25,30,.05);box-shadow:inset 0 0 0 1px rgba(60,40,30,.12)}
+.jr-badge.got{background:rgba(200,162,76,.15);box-shadow:inset 0 0 0 1px rgba(138,106,46,.42)}
+.jr-sigil{width:40px;height:40px;display:block}
+.jr-badge .nm{font:400 17px/1.2 var(--serif);color:#7a6a70}
+.jr-badge.got .nm{color:#21161f}
+.jr-badge .nm i{font-size:15.5px;color:#9b8f96}
+.jr-badge .ds{font-size:13.5px;line-height:1.35;color:#5a4a4e;margin-top:2px}
+.jr-badge:not(.got) .ds{font-style:italic;color:#7a6a70}
+.jr-badge .dt{font:700 10.5px var(--body);letter-spacing:.14em;text-transform:uppercase;color:#8a6a2e;margin-top:4px}
+@media (max-width:560px){ .jr-badges{grid-template-columns:minmax(0,1fr)} }
+@media (max-width:480px){
+  #journal .sheet,#welcomeBack .sheet{padding:22px 16px 20px}
+  #journal .jr-tabs button{padding:8px 10px 7px;letter-spacing:.03em}
+  .jr-ms,.jr-mss:has(.best) .jr-ms{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px 8px}
+  .jr-ms b{grid-column:1/-1}.jr-ms span{text-align:left}
+  .jr-tally{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+/* welcome back */
+#welcomeBack .sheet{max-width:560px;width:100%;margin-block:auto;gap:14px}
+#welcomeBack h2{font-size:clamp(34px,5.5vw,48px)}
+.wb-obj{display:grid;gap:3px;padding:10px 14px;border-left:3px solid #6c3f5f;background:rgba(255,255,255,.22)}
+.wb-obj .k{font:600 11px var(--body);letter-spacing:.18em;text-transform:uppercase;color:#6c3f5f}
+.wb-obj strong{font:400 22px/1.2 var(--serif);color:#21161f}
+.wb-obj .s{font-size:14px;color:#5a4a4e}
+.wb-near{display:flex!important;align-items:center;gap:10px;font-size:15.5px!important;color:#3d2f33!important}
+.wb-near[hidden]{display:none!important}
+.wb-near svg{width:34px;height:34px;flex:none}
+.wb-near small{display:block;font:700 10.5px var(--body);letter-spacing:.16em;text-transform:uppercase;color:#6c3f5f}
 .hearts .heart.born{animation:heartBorn 1.6s ease-out}
 @keyframes heartBorn{0%{transform:scale(.2);filter:drop-shadow(0 0 0 #ff7a96)}35%{transform:scale(1.45);filter:drop-shadow(0 0 10px #ff9ab0)}100%{transform:scale(1);filter:none}}
 @media (prefers-reduced-motion:reduce){.hearts .heart.born{animation:none}#rewardCard{transition:opacity .3s}}
@@ -644,10 +702,23 @@ function buildDOM(){
     const save=$('saveBtn'); if(save)acts.insertBefore(b,save); else acts.appendChild(b); b.addEventListener('click',()=>openJournal()); }
   const j=document.createElement('div'); j.className='card'; j.id='journal'; j.hidden=true; j.dataset.padBack='journalClose';
   j.setAttribute('role','dialog'); j.setAttribute('aria-modal','true'); j.setAttribute('aria-labelledby','journalTitle');
-  j.innerHTML='<div class="sheet"><div><span class="eyebrow">The keeper’s journal</span><h2 id="journalTitle">What you carry</h2></div><div id="journalBody"></div><div class="actions"><button class="btn" id="journalClose" type="button">Back</button></div></div>';
+  j.innerHTML='<div class="sheet"><div class="pz-tabs jr-tabs" id="journalTabs" role="tablist" aria-label="Journal">'+
+    JTABS.map(t=>`<button type="button" role="tab" id="jrTab-${t.id}" data-jt="${t.id}" aria-controls="${t.pane}" aria-selected="${t.id==='carry'}">${t.tab}</button>`).join('')+
+    '<span class="jr-tabkeys" aria-hidden="true"></span></div>'+
+    '<div><span class="eyebrow">The keeper’s journal</span><h2 id="journalTitle">What you carry</h2></div>'+
+    '<div id="journalBody" role="tabpanel" aria-labelledby="jrTab-carry"></div><div id="journalRecord" role="tabpanel" aria-labelledby="jrTab-record" hidden></div><div id="journalBadges" role="tabpanel" aria-labelledby="jrTab-badges" hidden></div>'+
+    '<div class="actions"><button class="btn" id="journalClose" type="button">Back</button></div></div>';
   document.body.appendChild(j);
   $('journalClose').addEventListener('click',()=>closeJournal());
-  addEventListener('keydown',e=>{ if(j.hidden)return; if(e.code==='Escape'||e.code==='KeyP'||e.code==='Backspace'||e.code==='KeyJ'){ e.preventDefault(); e.stopPropagation(); closeJournal(); } },true);
+  $('journalTabs').addEventListener('click',e=>{ const b=e.target.closest('[data-jt]'); if(b)setJournalTab(b.dataset.jt,true); });
+  addEventListener('keydown',e=>{ if(j.hidden)return;
+    if(e.code==='Escape'||e.code==='KeyP'||e.code==='Backspace'||e.code==='KeyJ'){ e.preventDefault(); e.stopPropagation(); closeJournal(); return; }
+    // left / right: the next tab; up / down and page keys scroll a long page (core keeps arrows from scrolling the page)
+    if(e.code==='ArrowRight'||e.code==='ArrowLeft'){ e.preventDefault(); e.stopPropagation(); cycleJournalTab(e.code==='ArrowRight'?1:-1); return; }
+    const sc={ArrowDown:60,ArrowUp:-60,PageDown:300,PageUp:-300}[e.code];
+    if(sc){ e.preventDefault(); e.stopPropagation(); j.scrollTop+=sc; }
+  },true);
+  buildWelcome();
 }
 let cardT=null;
 function showCard(o){
@@ -759,8 +830,43 @@ function openJournal(){
   const j=$('journal'); if(!j)return;
   journalFrom=!$('pause').hidden?'pause':null;
   if(journalFrom)$('pause').hidden=true;
-  renderJournal(); j.hidden=false;
+  syncJournalTabs(); renderJournal(); j.hidden=false; setJournalTab(jTab,false);
   const b=$('journalClose'); try{b.focus({preventScroll:true});}catch(_){b.focus();}
+}
+/* ---- Journal tabs: What you carry · Record · Badges (Record needs G.record, Badges needs G.badges) ---- */
+const JTABS=[{id:'carry',tab:'What you carry',title:'What you carry',pane:'journalBody'},{id:'record',tab:'Record',title:'The Keeper’s Record',pane:'journalRecord'},{id:'badges',tab:'Badges',title:'Badges',pane:'journalBadges'}];
+let jTab='carry', jPad=[], jClockT=0;
+const jAvail=id=>id==='record'?!!G.record:id==='badges'?!!(G.record&&G.badges&&G.badges.list):true;
+function syncJournalTabs(){
+  const tabs=$('journalTabs'); if(!tabs)return;
+  let n=0; for(const t of JTABS){ const b=$('jrTab-'+t.id), on=jAvail(t.id); if(b)b.hidden=!on; if(on)n++; }
+  tabs.hidden=n<2;
+  const k=tabs.querySelector('.jr-tabkeys'), g=G.ui&&G.ui.glyph; if(k)k.innerHTML=g&&G.input.device==='gamepad'?g('LB')+g('RB'):'';
+  if(!jAvail(jTab))jTab='carry';
+}
+function setJournalTab(t,focus){
+  if(!JTABS.some(x=>x.id===t)||!jAvail(t))t='carry';
+  jTab=t; const j=$('journal'); if(!j)return;
+  for(const x of JTABS){ const b=$('jrTab-'+x.id), p=$(x.pane); if(b)b.setAttribute('aria-selected',String(x.id===t)); if(p)p.hidden=x.id!==t; }
+  const h=$('journalTitle'); if(h)h.textContent=JTABS.find(x=>x.id===t).title;
+  if(t==='carry')renderJournal(); else if(t==='record')renderRecord(); else renderBadges();
+  j.scrollTop=0;
+  if(focus){ const f=$('jrTab-'+t); if(f){ try{f.focus({preventScroll:true});}catch(_){f.focus();} if(G.input.device==='gamepad')f.classList.add('pad-focus'); } }
+  G.emit('journal:tab',{tab:t});
+}
+function cycleJournalTab(d){
+  const ids=JTABS.map(x=>x.id).filter(jAvail); if(ids.length<2)return;
+  setJournalTab(ids[(ids.indexOf(jTab)+d+ids.length)%ids.length],true);
+}
+/* the controller in the Journal: LB / RB change tabs, the right stick scrolls (A, B and the D-pad are core's menu handling) */
+function updateJournalPad(dt){
+  const j=$('journal'); if(!j||j.hidden){ jPad=[]; return; }
+  if(jTab==='record'&&(jClockT-=dt)<=0){ jClockT=.5; const c=j.querySelector('[data-jr-clock]'); if(c&&G.record)c.textContent=G.record.fmt(G.record.play()); }
+  const g=G.input.padState?G.input.padState():null; if(!g){ jPad=[]; return; }
+  const btn=[]; for(let i=0;i<17;i++){ const b=g.B&&g.B[i]; btn[i]=b?(typeof b==='object'?(!!b.pressed||b.value>.5):b>.5):false; }
+  const prev=jPad, edge=i=>btn[i]&&!prev[i]; jPad=btn;
+  if(edge(5))cycleJournalTab(1); else if(edge(4))cycleJournalTab(-1);
+  const y=+(g.A&&g.A[3])||0; if(Math.abs(y)>.2)j.scrollTop+=y*900*Math.max(dt,1/60);
 }
 function closeJournal(){
   const j=$('journal'); if(!j||j.hidden)return; j.hidden=true;
@@ -796,6 +902,137 @@ function renderJournal(){
   <span class="eyebrow sec">Bosses</span><div class="jr-list">${d.bosses.map(b=>`<span class="${b.done?'on':''}">${b.done?check:''}${esc(b.name)}</span>`).join('')}</div>${d.found.length?`
   <span class="eyebrow sec">Keeper’s Hearts at sea</span><div class="jr-list">${d.found.map(b=>`<span class="${b.done?'on':''}">${b.done?check:ICON.heart}${esc(b.name)}</span>`).join('')}</div>`:''}`;
 }
+
+/* ---------------------------------------------------------------- the Keeper's Record pages (spec: RECORD.md, section 3) */
+const safe=(f,d)=>{ try{ const v=f(); return v==null?d:v; }catch(_){ return d; } };
+const PART_NAMES={bosses:'Bosses',shards:'Heart Shards',caches:'Keeper’s Caches',negatives:'Negatives freed',blights:'Blights cured',tempered:'Tempered',waystones:'Waystones',companions:'Companions'};
+const tFmt=t=>t==null?'—':G.record.fmt(t);
+function rankCell(){
+  const B=G.badges; if(!B||!B.rank)return '';
+  const r=safe(()=>B.rank(),null); if(!r)return '';
+  const next=r.next?`Next: <b>${esc(r.next.name)}</b>${r.next.need?' · '+esc(r.next.need):''}`:'The highest rank there is';
+  return `<div class="jr-cell"><span class="k">Rank</span><span class="v jr-rank">${esc(r.name)}</span><span class="s">${next}</span></div>`;
+}
+function renderRecord(){
+  const el=$('journalRecord'), R=G.record; if(!el||!R)return;
+  const st=R.state||{}, n=st.n||{}, c=safe(()=>R.completion(),{done:0,total:0,pct:0,parts:{}});
+  const days=(st.days||[]).length, runs=(st.runs||[]).length;
+  const parts=Object.keys(c.parts||{}).map(k=>{ const p=c.parts[k]; return `<span class="${p[0]>=p[1]?'on':''}">${esc(PART_NAMES[k]||k)} <b>${p[0]}/${p[1]}</b></span>`; }).join('');
+  // milestones: the reached ones in the order they were reached (older saves' back-filled ones, untimed, first in story order), then the rest unnamed
+  const idx={}; R.MILESTONES.forEach((m,i)=>idx[m.id]=i);
+  const got=R.MILESTONES.map(m=>({m,r:R.ms(m.id)})).filter(x=>x.r);
+  got.sort((a,b)=>{ const ta=a.r.t, tb=b.r.t; if(ta==null&&tb==null)return idx[a.m.id]-idx[b.m.id]; if(ta==null)return -1; if(tb==null)return 1; return ta-tb||idx[a.m.id]-idx[b.m.id]; });
+  const left=R.MILESTONES.length-got.length;
+  let ms=got.map(x=>{ const sp=R.split(x.m.id), best=runs?R.best(x.m.id):null;
+    return `<li class="jr-ms on" data-ms="${x.m.id}"><b>${esc(x.m.name)}</b><span><small>reached</small>${tFmt(x.r.t)}</span><span><small>split</small>${tFmt(sp)}</span>${runs?`<span class="best"><small>best</small>${tFmt(best)}</span>`:''}</li>`; }).join('');
+  if(left){ let d=''; for(let i=0;i<left;i++)d+='<span class="jr-dot" aria-label="Not reached yet">…</span>';
+    ms+=`<li class="jr-ahead">${d}<em>${left} still ahead</em></li>`; }
+  const cnt=[['Deaths',n.deaths],['Foes cleared',n.kills],['Negatives freed',n.freed],['Draughts drunk',n.draughts],['Fast travels',n.travels],['Techniques found',(st.combos||[]).length]];
+  const bosses=(R.BOSSES||[]).filter(id=>R.ms(id)).map(id=>{ const b=R.boss(id)||{}, m=R.MILESTONES.find(x=>x.id===id);
+    return `<li class="jr-ms on jr-boss" data-boss="${id}"><b>${esc(m?m.name:id)}</b><span><small>tries</small>${b.tries!=null?b.tries:'—'}</span><span><small>best</small>${tFmt(b.best)}</span></li>`; }).join('');
+  el.innerHTML=`<div class="jr-grid">
+    <div class="jr-cell"><span class="k">Time played</span><span class="v" data-jr-clock>${R.fmt(R.play())}</span><span class="s">${days} ${days===1?'day':'days'} on the island${st.run>1?' · run '+st.run:''}</span></div>
+    <div class="jr-cell"><span class="k">Complete</span><span class="v">${c.pct}%</span><span class="s">${c.done} of ${c.total} found, freed and beaten</span></div>
+    ${rankCell()}
+  </div>
+  <div class="jr-list jr-parts">${parts}</div>
+  <span class="eyebrow sec">Milestones${runs?` · best of ${runs} finished ${runs===1?'run':'runs'}`:''}</span>
+  <ol class="jr-mss">${ms}</ol>
+  <span class="eyebrow sec">Tallies</span>
+  <div class="jr-tally">${cnt.map(x=>`<span><b>${(+x[1]||0)|0}</b>${x[0]}</span>`).join('')}</div>
+  ${bosses?`<span class="eyebrow sec">Bosses beaten</span><ol class="jr-mss">${bosses}</ol>`:''}`;
+}
+const BADGE_CATS=[['story','The story'],['skill','Feats'],['collect','Collections'],['hidden','Secrets']];
+function sigil(cat,got){
+  const ring=got?'#c8a24c':'rgba(60,40,30,.32)', fill=got?'#4b3863':'rgba(60,40,30,.10)', ink=got?'#f1e2b0':'rgba(60,40,30,.38)';
+  const mark={
+    story:`<path d="M16 7l2.4 3.2v11.6h-4.8V10.2z" fill="${ink}"/><path d="M12 23.6h8" stroke="${ink}" stroke-width="1.8" stroke-linecap="round"/><path d="M16 7.6l-6-2.4M16 7.6l6-2.4" stroke="${ink}" stroke-width="1.2" stroke-linecap="round" opacity=".8"/>`,
+    skill:`<path d="M10.5 23.5l9-11" stroke="${ink}" stroke-width="2.2" stroke-linecap="round"/><path d="M21 6.5l1.2 2.7 2.8.4-2 2 .5 2.8-2.5-1.4-2.5 1.4.5-2.8-2-2 2.8-.4z" fill="${ink}"/>`,
+    collect:`<path d="M16 7l4.4 6.2L16 25l-4.4-11.8z" fill="${ink}"/><path d="M11.6 13.2h8.8" stroke="${fill}" stroke-width="1"/>`,
+    hidden:`<path d="M8 16c2.4-3.8 5-5.4 8-5.4s5.6 1.6 8 5.4c-2.4 3.8-5 5.4-8 5.4S10.4 19.8 8 16z" fill="none" stroke="${ink}" stroke-width="1.6"/><circle cx="16" cy="16" r="2.6" fill="${ink}"/>`
+  }[cat]||'';
+  return `<svg class="jr-sigil" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="${fill}" stroke="${ring}" stroke-width="2"/><circle cx="16" cy="16" r="11.4" fill="none" stroke="${ring}" stroke-width=".8" opacity=".7"/>${mark}</svg>`;
+}
+function dateOf(ms){ try{ return new Date(ms).toLocaleDateString([], {day:'numeric',month:'short',year:'numeric'}); }catch(_){ return ''; } }
+function renderBadges(){
+  const el=$('journalBadges'), B=G.badges; if(!el||!B||!B.list)return;
+  const list=safe(()=>B.list(),[]), n=safe(()=>B.count(),list.filter(b=>b.got).length), m=safe(()=>B.total(),list.length);
+  let h=`<p class="jr-bcount"><b>${n}</b> of ${m} badges</p>`;
+  for(const [cat,title] of BADGE_CATS){
+    const items=list.filter(b=>b.cat===cat); if(!items.length)continue;
+    h+=`<span class="eyebrow sec">${title} · ${items.filter(b=>b.got).length}/${items.length}</span><div class="jr-badges">`;
+    for(const b of items){
+      const got=!!b.got, hidden=!got&&b.hidden, named=got||(!hidden&&b.shown);
+      const name=got||named?esc(b.name):hidden?'???':'<i>Not yet revealed</i>';
+      const text=got?esc(b.desc||''):hidden?'A secret of the island.':esc(b.hint||'');
+      h+=`<div class="jr-badge${got?' got':''}" data-badge="${esc(b.id)}">${sigil(cat,got)}<div><div class="nm">${name}</div>${text?`<div class="ds">${text}</div>`:''}${got&&b.got>1?`<div class="dt">Earned ${esc(dateOf(b.got))}</div>`:''}</div></div>`;
+    }
+    h+='</div>';
+  }
+  el.innerHTML=h;
+}
+
+/* ---------------------------------------------------------------- welcome back (Continue after 12 h or more away)
+   One card before play: where you were and the objective, time played, completion, rank and the nearest badge. "Carry on"
+   (Enter / A / B / tap). Off in the pause menu (localStorage 'bq-welcome'). Never in ?debug, headless or test-save sessions
+   unless a test sets G.progress.welcome.allowInTests. */
+const WELCOME_H=12, WELCOME_KEY='bq-welcome';
+let welcomeOn=true;
+try{ const w=JSON.parse(localStorage.getItem(WELCOME_KEY)||'null'); if(w&&typeof w.show==='boolean')welcomeOn=w.show; }catch(_){}
+function setWelcomeOn(v){ welcomeOn=!!v; try{ localStorage.setItem(WELCOME_KEY,JSON.stringify({show:welcomeOn})); }catch(_){} syncWelcomeSeg(); G.emit('settings',{welcomeBack:welcomeOn}); }
+function syncWelcomeSeg(){ document.querySelectorAll('#welcomeSeg button').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.welcome==='on')===welcomeOn))); }
+let wbSave=null, wbT=0;
+function buildWelcome(){
+  document.querySelectorAll('#welcomeSeg button').forEach(b=>b.addEventListener('click',()=>setWelcomeOn(b.dataset.welcome==='on')));
+  syncWelcomeSeg(); G.on('mode',e=>{ if(e.mode==='paused')syncWelcomeSeg(); });
+  const w=document.createElement('div'); w.className='card'; w.id='welcomeBack'; w.hidden=true; w.dataset.padBack='welcomeGo';
+  w.setAttribute('role','dialog'); w.setAttribute('aria-modal','true'); w.setAttribute('aria-labelledby','wbTitle');
+  w.innerHTML='<div class="sheet"><div><span class="eyebrow">The keeper’s record</span><h2 id="wbTitle">Welcome back</h2></div><p id="wbAway"></p>'+
+    '<div class="wb-obj"><span class="k">Objective</span><strong id="wbObj"></strong><span class="s" id="wbSub"></span></div>'+
+    '<div class="jr-grid" id="wbStats"></div><p class="wb-near" id="wbNear" hidden></p>'+
+    '<div class="actions"><button class="btn" id="welcomeGo" type="button">Carry on</button></div></div>';
+  document.body.appendChild(w);
+  $('welcomeGo').addEventListener('click',()=>closeWelcome());
+  addEventListener('keydown',e=>{ if(w.hidden)return; if(['Escape','Enter','NumpadEnter','Space'].includes(e.code)){ e.preventDefault(); e.stopPropagation(); closeWelcome(); } },true);
+  // anything else that resumes play (the pause key, the pause button) takes the card with it
+  G.on('mode',e=>{ if(e.mode!=='paused'&&!w.hidden){ w.hidden=true; wbSave=null; } });
+}
+function welcomeDue(save){
+  if(!welcomeOn||!save||save.quiet)return false;
+  if((G.debugUrl||G.headless||G.testSaves)&&!WELCOME.allowInTests)return false;
+  const r=save.mods&&save.mods.record, last=+(r&&r.last)||+save.at||0;   // a save from before the record: when it was written
+  return last>0&&Date.now()-last>WELCOME_H*3600e3;
+}
+function away(ms){ const h=ms/3600e3; if(h<48)return Math.max(1,Math.round(h))+' hours'; return Math.round(h/24)+' days'; }
+function renderWelcome(){
+  const s=wbSave; if(!s)return;
+  const r=s.mods&&s.mods.record, last=+(r&&r.last)||+s.at||0, R=G.record;
+  $('wbAway').textContent='You’ve been away '+away(Date.now()-last)+'.'+(s.cpName?' You last rested at '+s.cpName+'.':'');
+  $('wbObj').textContent=s.objective||'Explore the island'; $('wbSub').textContent=s.sub||''; $('wbSub').hidden=!s.sub;
+  const c=R?safe(()=>R.completion(),null):null;
+  $('wbStats').innerHTML=(R?`<div class="jr-cell"><span class="k">Time played</span><span class="v">${R.fmt(R.play())}</span></div>`:'')+
+    (c?`<div class="jr-cell"><span class="k">Complete</span><span class="v">${c.pct}%</span></div>`:'')+rankCell();
+  const nb=G.badges&&G.badges.nearest?safe(()=>G.badges.nearest(),null):null, ne=$('wbNear');
+  ne.hidden=!(nb&&nb.text); ne.innerHTML=nb&&nb.text?sigil('collect',true)+'<span><small>Nearest badge</small>'+esc(nb.text)+'</span>':'';
+}
+function showWelcome(save){
+  const w=$('welcomeBack'); if(!w)return false;
+  wbSave=save; wbT=0;
+  G.setMode('paused'); G.input.unlockPointer();
+  renderWelcome(); w.hidden=false;
+  const b=$('welcomeGo'); try{b.focus({preventScroll:true});}catch(_){b.focus();} if(G.input.device==='gamepad')b.classList.add('pad-focus');
+  G.emit('welcome:open',{});
+  return true;
+}
+function closeWelcome(){
+  const w=$('welcomeBack'); if(!w||w.hidden)return; w.hidden=true; wbSave=null;
+  if(G.state.mode==='paused'){ G.setMode('play'); G.input.lockPointer(); }
+  G.emit('welcome:close',{});
+}
+// the save's other modules settle over the first frames (back-filled milestones, quiet badge grants): keep the card current
+function updateWelcome(dt){ if(!wbSave)return; if((wbT+=dt)>.5){ wbT=0; renderWelcome(); } }
+const WELCOME={ due:welcomeDue, show:showWelcome, close:closeWelcome, get open(){ return !!wbSave; },
+  get enabled(){ return welcomeOn; }, set enabled(v){ setWelcomeOn(v); }, allowInTests:false, HOURS:WELCOME_H };
 
 /* ---------------------------------------------------------------- teaching the glide (a playtester never found it on his own)
    One caption, once per save (S.said.glide): the first time you stand on the headland's west edge above the moor spire with
@@ -838,7 +1075,8 @@ const API=G.progress={
   get marks(){ return marksHeld(); }, get shards(){ return shardN(); }, get wings(){ return wingN(); },
   get spots(){ return SPOTS; }, get caches(){ return CACHES; }, get busy(){ return !!reward.active||queue.length>0; },
   get rewarding(){ return reward.active?reward.active.id:null; },
-  journal:{open:openJournal,close:closeJournal,data:journalData},
+  journal:{open:openJournal,close:closeJournal,data:journalData,tab:t=>{ if(t)setJournalTab(t,false); return jTab; }},
+  welcome:WELCOME,
   reconcile:q=>reconcile(q),
   get reveal(){ return reveal; }, set reveal(v){ reveal=!!v; },
   /* devtools + tests */
@@ -892,7 +1130,7 @@ G.system('progress',{order:62,modes:'always',
   update(dt){
     const mode=G.state.mode;
     if(mode==='title')return;
-    updatePanel();
+    updatePanel(); updateJournalPad(dt); updateWelcome(dt);
     const sweep=!API.debug.noSweep; // tests that build a state by hand switch the automatic grants off
     if(reconcileT>0){ reconcileT-=dt; if(reconcileT<=0&&sweep)reconcile(true); }
     if(mode==='play')updateGlideHint();

@@ -11,7 +11,8 @@
                  replaces the game on this device) joins a code from another device.
    - Feedback:   "Send feedback" on the title, pause and ending cards. Posts the
                  text with the build, input type and current objective.
-   - Progress:   a few anonymous milestone pings (started, bosses, deaths) so we
+   - Progress:   a few anonymous milestone pings (started, bosses, deaths, the
+                 Keeper's Record milestones) so we
                  can see where players stop. No names, no ids kept between
                  sessions, and none at all if the browser sends Do Not Track.
    API: G.beta = { version, openSync(from), openFeedback(from), ping(name) }
@@ -166,6 +167,7 @@ function wirePings(){
   once('undercroft:enter','undercroft_enter'); once('undercroft:saved','undercroft_saved');
   once('temple:hesper',d=>'temple_hesper:'+(d.state||''));
   once('boat:sail',d=>d.ready?'boat_sail':'boat_not_ready');
+  once('record:milestone',d=>'milestone:'+(d.id||'unknown'));   // the Keeper's Record: once per save, never for back-filled ones
   G.on('player:respawn',d=>{ if(!(d&&d.restored))ping('death',true); });
 }
 

@@ -127,7 +127,12 @@ function stagEdge(){ const t=LM().resistingTree||{x:-165,z:5}, x=t.x+39, z=t.z+2
 function begin(fromSave){
   $('title').hidden=true; $('hud').hidden=false; $('pauseBtn').hidden=false;
   const save=fromSave===true?readSave():(fromSave&&typeof fromSave==='object'?fromSave:null); // devtools.js passes a built save object
-  if(save){ G.setMode('play'); G.input.lockPointer(); applySave(save); if(!save.quiet)setTimeout(()=>G.ui.say('You pick up where you left off: '+(save.objective||'the island')+'.'),500); return; }
+  if(save){
+    // Continue after 12 h or more away: one welcome-back card before play (progression.js), in place of the pick-up line
+    const W=fromSave===true&&G.progress&&G.progress.welcome, wb=!!(W&&W.due(save));
+    G.setMode('play'); if(!wb)G.input.lockPointer(); applySave(save);
+    if(wb)W.show(save); else if(!save.quiet)setTimeout(()=>G.ui.say('You pick up where you left off: '+(save.objective||'the island')+'.'),500);
+    return; }
   // a new game: Rowan washes up on the south beach beside the wreck of his boat (world.js, LM.wreckStart); the lighthouse start is the fallback
   const wr=LM().wreckStart, st=wr||LM().start||{x:164,y:42,z:-4,yaw:Math.PI/2};
   G.state.checkpoint.set(st.x,st.y,st.z); G.state.checkpointYaw=st.yaw; G.state.checkpointName=wr?'the south beach':'the lighthouse';
@@ -306,7 +311,15 @@ function snapshot(){
     storm:(()=>{const T=storm(); return {found:!!T.found,carried:!!T.carried,inCradle:!!T.inCradle,failed:!!T.failed,spent:!!T.spent,pos:arr(T.pos)};})(), stagDead,
     lampCured:!!(G.lighthouse&&G.lighthouse.cured), bossDead,
     freed:(G.creatures&&G.creatures.negatives)?G.creatures.negatives.map((n,i)=>n.dead?i:-1).filter(i=>i>=0):[],
-    loop:G.loop.active, mods:Object.fromEntries(Object.entries(persist).map(([k,h])=>{ try{return [k,h.save()];}catch(e){return [k,null];} }))};
+    loop:G.loop.active, rec:recCard(), mods:Object.fromEntries(Object.entries(persist).map(([k,h])=>{ try{return [k,h.save()];}catch(e){return [k,null];} }))};
+}
+/* the title's Continue card shows the saved game's rank and completion without loading it: kept beside the save */
+function recCard(){
+  const R=G.record, B=G.badges; if(!R)return null;
+  const o={play:Math.round(R.play()||0)};
+  try{ o.pct=R.completion().pct; }catch(_){}
+  try{ if(B&&B.rank){ const r=B.rank(); o.rank=r.name; o.ri=r.i; } }catch(_){}
+  return o;
 }
 function writeSave(){
   if(G.state.mode!=='play'&&G.state.mode!=='paused'&&G.state.mode!=='ending')return false;
@@ -394,6 +407,17 @@ function refreshTitle(){
   const sv=readSave(), c=$('continue'), b=$('begin'), info=$('saveInfo'); if(!c||!b||!info)return;
   c.hidden=!sv; b.textContent=sv?'New game':'Begin'; b.classList.toggle('ghost',!!sv);
   info.hidden=!sv; info.textContent=sv?'Saved '+ago(sv.at)+' · '+(sv.objective||'')+'. Starting a new game replaces this save once it auto-saves.':'';
+  const rec=$('saveRec'); if(rec){ const parts=sv?saveRecord(sv):[]; rec.hidden=!parts.length; rec.innerHTML=parts.join(''); }
+}
+/* rank · time played · completion for a stored save (time from its record; rank and completion as they were when it was saved) */
+function saveRecord(sv){
+  const m=sv.mods&&sv.mods.record, c=sv.rec||{}, out=[], esc=t=>String(t).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  const play=m&&typeof m.play==='number'?m.play:c.play;
+  const fmt=G.record&&G.record.fmt?G.record.fmt:(t=>Math.floor(t/60)+' min');
+  if(c.rank)out.push('<span class="sr-rank">'+esc(c.rank)+'</span>');
+  if(typeof play==='number'&&play>=1)out.push('<span data-sr="play">'+esc(fmt(play))+' played</span>');
+  if(typeof c.pct==='number')out.push('<span data-sr="pct">'+(c.pct|0)+'% complete</span>');
+  return out;
 }
 /* hooks for devtools.js (test start points build a save object and play it through applySave, the same path as Continue) */
 G.flow={begin, refreshTitle, applySave, snapshot, writeSave, readSave, startLoop, keys:{save:SAVE_KEY,test:TEST_KEY}, get bossDead(){return bossDead;}, get stagDead(){return stagDead;},

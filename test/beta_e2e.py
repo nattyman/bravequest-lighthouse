@@ -90,6 +90,13 @@ async def main():
             check('upload', bool(sv) and sv['at'] == r['at'] and sv['v'] == 1 and isinstance(sv['save'], str) and len(sv['save']) > 100, {'puts': fake.puts, 'has': bool(sv), 'size': len(sv['save']) if sv else 0})
             ev = [e['name'] for e in fake.events]
             check('pings', 'session' in ev and 'play' in ev and all(e['build'] == '9.9.9-test' and re.match(r'^[a-z0-9]{8,24}$', e['sid']) and e['platform'] in ('touch', 'keyboard', 'pad', 'unknown') for e in fake.events), {'events': ev})
+            # the Keeper's Record: a milestone pings once (milestone:<id>); none in a quiet (test-save) session, none for a back-filled one
+            await pg.evaluate("""() => { G.record.debug.reach('plain-flame'); G.emit('record:milestone',{id:'plain-flame',t:1,restored:false});
+                G.emit('record:milestone',{id:'lantern',t:null,restored:true});
+                G.testSaves=true; G.record.debug.reach('stag'); G.testSaves=false; }""")
+            await pg.wait_for_timeout(1500)
+            ev = [e['name'] for e in fake.events]
+            check('milestonePing', ev.count('milestone:plain-flame') == 1 and 'milestone:stag' not in ev and 'milestone:lantern' not in ev, {'events': ev})
         await step('upload', upload)
 
         async def feedback():
