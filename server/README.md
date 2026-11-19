@@ -7,11 +7,16 @@ A small HTTP service for Brave Quest: Lighthouse. It stores:
 - **player feedback**;
 - **player records** for the Keepers' Board (best times, deaths, completion, an optional display name).
 
-There are no accounts. The service does not store IP addresses, and it never stores the sync
-code itself, only `sha256(code)`. The only things a player can identify themselves with are the
-optional `contact` field on feedback and the optional board name, both filled in by choice.
+Optional **keeper accounts** (sign in by emailed link, six-digit code or password) are built in but
+switched off unless configured: see [Accounts](#accounts). Guests and their sync codes work exactly
+the same either way.
 
-Node 22, plain JavaScript, built-in `node:http`. One runtime dependency: `pg`.
+The service does not store IP addresses, and it never stores the sync code itself, only
+`sha256(code)`. Without an account, the only things a player can identify themselves with are the
+optional `contact` field on feedback and the optional board name, both filled in by choice. With an
+account the service also holds the account's email address.
+
+Node 22, plain JavaScript, built-in `node:http`, `node:crypto` and `fetch`. One runtime dependency: `pg`.
 
 ## Endpoints
 
@@ -128,6 +133,14 @@ IPv6 clients are counted per /64.
 | `DATABASE_URL` | unset | Postgres connection string. When unset the service uses an in-memory store and **nothing is persistent** (it says so at startup) |
 | `ALLOWED_ORIGINS` | empty | Comma-separated browser origins allowed by CORS. See below |
 | `TRUST_PROXY` | `1` | When `1`, the client IP is `CF-Connecting-IP`, else the first `X-Forwarded-For` entry, else the socket address. Set to `0` if the service is reachable directly |
+| `ACCOUNTS` | unset | `on` switches accounts on, if the four settings below are also set. Otherwise every account path answers `503 {error:"accounts_off"}` |
+| `APP_URL` | unset | The game's address; sign-in links are `APP_URL?signin=<token>` |
+| `SESSION_SECRET` | unset | At least 32 random characters. Keys the hashes of sign-in links and codes |
+| `RESEND_API_KEY`, `MAIL_FROM` | unset | The mail sender (Resend), e.g. `MAIL_FROM=Brave Quest <keeper@example.com>` |
+| `MAIL_FAKE` | unset | `1`: keep emails in memory instead of sending them (local use and tests only; nothing is sent or logged) |
+| `COOKIE_INSECURE` | unset | `1`: leave `Secure` off the session cookie (local use over plain http only) |
+| `SUPER_ADMIN_EMAILS` | empty | Comma-separated addresses that are made `admin` at every sign-in and cannot be demoted, disabled or deleted |
+| `ADMIN_API_KEY` | unset | At least 32 characters. Turns on the private admin API under `/admin/v1` (answers 404 while unset) |
 
 `ALLOWED_ORIGINS` entries are either exact origins or contain one `*`:
 
@@ -145,6 +158,83 @@ named in a warning at startup. If the list is empty, no browser can use the serv
 Keep `TRUST_PROXY=1` only when every request arrives through the proxy or tunnel: those headers
 can be set by anyone who can reach the port directly, which would let them dodge the rate limits.
 
+## Accounts
+
+Accounts are optional: a player can sign in to keep their keeper name and saves across
+devices. There is no sign-up form: the first successful sign-in by link or code creates
+the account; a password can be added afterwards.
+
+They are **off** unless `ACCOUNTS=on`, `APP_URL`, `SESSION_SECRET` and a mail sender are all set
+(the start-up log says which are missing, by name). While off, `/v1/auth/*`, `/v1/me` and
+`/v1/saves*` answer `503 {error:"accounts_off"}` and nothing else changes.
+
+**Sessions.** Signing in sets the cookie `bq_s` (a random 32-byte token; the database keeps only its
+SHA-256): `Path=/; Max-Age=5184000; HttpOnly; Secure; SameSite=Lax`, no `Domain`. A signed-in request
+more than a day after the last renewal sets the cookie again and moves the expiry to 60 days from then.
+Sessions that expire are deleted.
+
+**Who a request belongs to.** A live `bq_s` cookie means that account; otherwise a valid
+`Authorization: Bearer <sync code>` means that guest, exactly as before; with both, the account wins.
+
+**Browsers.** Account paths (and, while accounts are on, every `/v1` path) allow the `X-BQ-Client`
+header and `DELETE` in CORS. Only origins listed exactly in `ALLOWED_ORIGINS` get
+`Access-Control-Allow-Credentials: true`; wildcard entries (itch.io, `localhost:*`) never do, so to test
+accounts locally list the exact origin, e.g. `http://localhost:8996`. Any request that uses the cookie
+and is not GET/HEAD, and the sign-in routes that make a session (`code`, `link`, `password`), must carry
+`X-BQ-Client: 1` and an exactly-listed `Origin`, else `403 {error:"bad_origin"}`.
+
+| Method | Path | Success | Errors |
+| --- | --- | --- | --- |
+| POST | `/v1/auth/start` `{email}` | `200 {ok:true, id}` and one email with a link and a six-digit code | `400 bad_email`, `429` |
+| POST | `/v1/auth/code` `{id, code}` | `200 {ok:true, me}` + cookie | `400 {error:"bad_code", left}`, `410 expired`, `403 disabled` |
+| POST | `/v1/auth/link` `{token}` | `200 {ok:true, me}` + cookie | `410 expired`, `403 disabled` |
+| POST | `/v1/auth/password` `{email, password}` | `200 {ok:true, me}` + cookie | `401 bad_login` |
+| POST | `/v1/auth/signout` `{everywhere?}` | `200 {ok:true}`, cookie cleared | |
+| GET | `/v1/me` | `200 me` | `401 signed_out`, `403 disabled` |
+| PUT | `/v1/me` `{name?, password?:{new, current?}}` | `200 {ok:true, me}` | `400 name_invalid`, `409 name_taken`, `400 weak_password`, `401 bad_login`, `403 reauth` |
+| DELETE | `/v1/me` | `200 {ok:true}`, cookie cleared | `403 reauth`, `409 super` |
+
+`me` is `{id, email, name, role, tools, hasPassword, created}` (`created` in ms). The save-slot paths
+(`/v1/saves*`) and the admin API's routes answer `501 {error:"not_implemented"}` until they are built.
+
+- `start` answers the same for every well-formed address (new, existing, disabled, or over its limit),
+  so it never shows whether an address has an account. The link and the code expire after 15 minutes
+  and work once; using either spends both, and a successful sign-in retires any other sign-in emails
+  still waiting for that address. A code allows five wrong tries; the answer says how many are left.
+- Every password sign-in failure is the same `401 bad_login`, and takes the same scrypt work.
+  Passwords are 10 to 200 characters and not on a short list of common ones. They are stored as
+  `scrypt$N$r$p$salt$hash` (N=16384, r=8, p=1, random salt); at most two hashes run at once and 16 wait,
+  beyond that the answer is `429`.
+- Setting a first password, and deleting the account, need a session made in the last 15 minutes
+  (`403 reauth`: sign in again). Changing a password needs the current one; it ends the account's
+  other sessions and sends a "password changed" email.
+- `name` is the keeper name, with the same rules as the board name; it is unique across accounts and
+  guests' board names. `""` clears it.
+- Deleting the account removes it with its save slots, its board record and its sessions, and sends an
+  "account deleted" email. A super admin cannot delete their account.
+- Roles: `player` (no test tools), `tester` (the tool groups in the `tester_tools` setting, by default
+  `start, give, map, teleport`, plus any ticked for the account), `admin` (all six: `start, cheats, give,
+  map, teleport, monsters`).
+
+**Limits** (in memory, per process; all in `src/accounts/limits.js`): `start` 5 an hour per address
+(over it: the usual answer, no email) and 20 an hour per client; `code` + `link` 60 per 15 minutes per
+client; `password` 10 per 15 minutes per address and client, 30 per client; `/v1/me` and `signout` 120 a
+minute per client. Every `429` has `Retry-After`.
+
+**Email** goes through Resend's API (`RESEND_API_KEY`, `MAIL_FROM`). A failed send is logged as one
+line without the address, and does not change any answer. The service never logs addresses, tokens,
+codes, cookies or passwords.
+
+**Tables** (created at start-up like the others; the existing tables are not changed):
+`accounts`, `sessions`, `sign_ins`, `account_saves`, `audit`, `settings`. An account's board record is a
+row in `records` with id `a:<account id>`.
+
+**Private admin API** (`/admin/v1/*`, for the studio admin on the internal network): on only when
+`ADMIN_API_KEY` is set (at least 32 characters). Requests that came through the public tunnel (with a
+`CF-Connecting-IP` or `CF-Ray` header) or from a browser (with an `Origin` header) get 404. Otherwise
+`X-Admin-Key` must match (`401 {error:"admin_key"}`) and `X-Admin-Email` must name the signed-in admin
+(`400 {error:"admin_email"}`).
+
 ## Run locally
 
 ```
@@ -160,8 +250,8 @@ With Postgres:
 DATABASE_URL=postgres://user:pass@localhost:5432/lighthouse ALLOWED_ORIGINS='http://localhost:*' npm start
 ```
 
-The tables (`saves`, `events`, `feedback`, `records`) and their indexes are created at startup if
-they do not exist (`CREATE … IF NOT EXISTS`, under an advisory lock). Deploying this version on a
+The tables (`saves`, `events`, `feedback`, `records`, and the account tables) and their indexes are
+created at startup if they do not exist (`CREATE … IF NOT EXISTS`, under an advisory lock). Deploying this version on a
 database that already has the other tables needs no manual step: the `records` table appears on the
 first start. That only covers new tables and indexes: a later change to the columns of an existing
 table would need its own `ALTER TABLE`, because `IF NOT EXISTS` leaves an existing table as it is.
@@ -195,6 +285,10 @@ filling with test rows:
 ```
 TEST_DATABASE_URL=postgres://user:pass@localhost:5432/lighthouse_test npm test
 ```
+
+The account tests use a fake clock and a fake mailer; one of the Postgres tests builds the schema of
+the version before accounts in a schema of its own, fills it, and checks that starting the new code
+leaves every row and column as it was.
 
 ## Deploy on Coolify
 
@@ -238,8 +332,20 @@ update records set hidden = true where name_key = lower('Some Name');
 ```
 src/index.js   reads the environment, builds the store, listens, shuts down on SIGTERM
 src/app.js     createApp({ store, config }) -> (req, res) handler: routing, CORS, limits, validation
+src/http.js    request helpers shared by all routes: sync keys, client address, bodies, answers, limiter
 src/records.js record and board rules: milestone and boss ids, floors, ranges, name and crew checks
 src/blocked-words.js  the words a board name may not contain (extend it here)
-src/store.js   createMemoryStore() and createPgStore(databaseUrl)
+src/store.js   createMemoryStore() and createPgStore(databaseUrl); mounts the account stores below
+src/stores/accounts.js  accounts, sessions, sign_ins (memory + Postgres)
+src/stores/slots.js     account_saves
+src/stores/admin.js     audit, settings
+src/accounts/config.js       the account settings from the environment
+src/accounts/limits.js       every account limit and constant
+src/accounts/context.js      sessions, cookies, request checks, the owner resolver, roles and tools, `me`
+src/accounts/crypto.js       tokens, hashes, scrypt passwords (with a concurrency cap)
+src/accounts/mailer.js       Resend sender and the fake one; emails.js: the three emails
+src/accounts/auth-routes.js  /v1/auth/* and /v1/me
+src/accounts/saves-routes.js /v1/saves*
+src/accounts/admin-routes.js /admin/v1/* and its guard
 test/          node --test suites
 ```
