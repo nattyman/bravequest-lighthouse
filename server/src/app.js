@@ -199,6 +199,8 @@ export function createApp({ store, config = {} }) {
   const accounts = config.accounts
     ? createAccountsContext({ store, accounts: config.accounts, origins, now, log })
     : null;
+  // The save-slot routes share the guest save size and the guest failed-lookup budget (claims take a code).
+  if (accounts) accounts.guest = { limits, maxSaveBodyBytes };
   const accountRouteList = accounts ? [...authRoutes(accounts), ...savesRoutes(accounts)] : [];
   const adminRouteList = accounts ? adminRoutes(accounts) : [];
 
@@ -305,31 +307,91 @@ export function createApp({ store, config = {} }) {
     return send(res, 204);
   }
 
+  /**
+   * Who a record or board request is for. While accounts are on this is the owner resolver (a session wins over
+   * a Bearer code); otherwise the Bearer code exactly as before.
+   * -> { kind: 'account', id: 'a:' + account id, account } | { kind: 'guest', id } | null (no credentials)
+   *    | { error, status } (401 bad_key, 403 bad_origin / disabled)
+   */
+  async function recordOwner(req, res) {
+    if (accounts?.enabled) {
+      const r = await accounts.resolveOwner(req, res);
+      if (r.error) return r;
+      if (!r.owner) return null;
+      if (r.owner.kind === 'account') {
+        return { kind: 'account', id: store.accounts.recordId(r.owner.id), account: r.owner.account };
+      }
+      return r.owner;
+    }
+    if (req.headers.authorization === undefined) return null;
+    const key = keyFromRequest(req);
+    if (!key) return { error: 'bad_key', status: 401 };
+    return { kind: 'guest', id: saveIdForKey(key) };
+  }
+
   // PUT /v1/record shares the events budget (the game sends it alongside its progress pings).
   async function putRecord(req, res, ip) {
     const verdict = limits.events.take(ip);
     if (!verdict.ok) return limited(res, verdict);
-    const key = keyFromRequest(req);
-    if (!key) return send(res, 401, { error: 'bad_key' });
+    const owner = await recordOwner(req, res);
+    if (owner?.error) return send(res, owner.status, { error: owner.error });
+    if (!owner) return send(res, 401, { error: 'bad_key' });
     const raw = await readBody(req, MAX_SMALL_BODY_BYTES);
     if (raw === TOO_LARGE) return tooLarge(res);
-    const checked = validateRecord(parseJsonObject(raw));
+    const body = parseJsonObject(raw);
+    if (owner.kind === 'account' && body?.test === true) return send(res, 400, { error: 'bad_request' });
+    const checked = validateRecord(body);
     if (checked.error) return send(res, 400, { error: checked.error });
-    const result = await store.putRecord(saveIdForKey(key), checked.record);
+    if (owner.kind === 'account') return putAccountRecord(res, owner, checked.record);
+
+    // While accounts are on, a new keeper name needs an account. A guest who has one keeps it, may clear it
+    // and may send the same one again.
+    if (accounts?.enabled && checked.record.name !== undefined && checked.record.nameKey !== '') {
+      const stored = await store.getRecord(owner.id);
+      const storedKey = stored ? stored.name.toLowerCase() : '';
+      if (storedKey === '' || storedKey !== checked.record.nameKey) return send(res, 403, { error: 'account_needed' });
+    }
+    const result = await store.putRecord(owner.id, checked.record);
     if (result.status === 'ok') return send(res, 200, { ok: true, name: result.name });
     if (result.status === 'name_taken') return send(res, 409, { error: 'name_taken' });
     return send(res, 404, { error: 'no_save' });
   }
 
+  // An account's record: id 'a:' + account id, needs a non-test save slot (no guest save), and its name is the
+  // account's keeper name, written only through store.accounts.setName (the PUT /v1/me path).
+  async function putAccountRecord(res, owner, record) {
+    const accountId = owner.account.id;
+    const slots = await store.slots.list(accountId);
+    if (!slots.some((x) => !x.test)) return send(res, 404, { error: 'no_save' });
+    if (record.name !== undefined) {
+      const r = await store.accounts.setName(accountId, { name: record.name, key: record.nameKey });
+      if (r.status === 'name_taken') return send(res, 409, { error: 'name_taken' });
+      if (r.status !== 'ok') return send(res, 401, { error: 'signed_out' });
+    }
+    const result = await store.putRecord(owner.id, { ...record, name: undefined, nameKey: undefined }, { needSave: false });
+    if (result.status !== 'ok') return send(res, 404, { error: 'no_save' });
+    const account = await store.accounts.byId(accountId);
+    if (!account) return send(res, 401, { error: 'signed_out' });
+    // A record row made just now starts without a name: bring it in step with the account's (under the name lock).
+    if (result.name !== account.displayName) {
+      const r = await store.accounts.setName(accountId, { name: account.displayName, key: account.nameKey });
+      if (r.status !== 'ok') return send(res, 409, { error: 'name_taken' });
+    }
+    return send(res, 200, { ok: true, name: account.displayName });
+  }
+
   async function getRecord(req, res, ip) {
     let verdict = limits.boards.take(ip);
     if (!verdict.ok) return limited(res, verdict);
-    const key = keyFromRequest(req);
-    if (!key) return send(res, 401, { error: 'bad_key' });
-    // An address already locked out for guessing save codes is locked out here too.
-    verdict = limits.failedLookups.check(ip);
-    if (!verdict.ok) return limited(res, verdict);
-    const row = await store.getRecord(saveIdForKey(key));
+    const owner = await recordOwner(req, res);
+    if (owner?.error) return send(res, owner.status, { error: owner.error });
+    if (!owner) return send(res, 401, { error: 'bad_key' });
+    if (owner.kind === 'guest') {
+      // An address already locked out for guessing save codes is locked out here too.
+      verdict = limits.failedLookups.check(ip);
+      if (!verdict.ok) return limited(res, verdict);
+    }
+    const row = await store.getRecord(owner.id);
     if (!row) return send(res, 404, { error: 'no_record' });
     return send(res, 200, row);
   }
@@ -337,12 +399,9 @@ export function createApp({ store, config = {} }) {
   async function getBoard(req, res, ip, query) {
     const verdict = limits.boards.take(ip);
     if (!verdict.ok) return limited(res, verdict);
-    let youId;
-    if (req.headers.authorization !== undefined) {
-      const key = keyFromRequest(req);
-      if (!key) return send(res, 401, { error: 'bad_key' });
-      youId = saveIdForKey(key);
-    }
+    const owner = await recordOwner(req, res);
+    if (owner?.error) return send(res, owner.status, { error: owner.error });
+    const youId = owner ? owner.id : undefined;
     const q = parseBoardQuery(new URLSearchParams(query));
     if (!q) return send(res, 400, { error: 'bad_request' });
     const result = await store.board({ ...q, youId });

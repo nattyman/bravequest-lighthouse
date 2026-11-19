@@ -11,10 +11,12 @@
 //       -> { status: 'create_denied' }      id does not exist and allowCreate was false
 //   addEvent({ name, build, platform, sid })
 //   addFeedback({ text, build, platform, progress, contact })
-//   putRecord(id, record)                   record as returned by validateRecord() in records.js
+//   putRecord(id, record, { needSave = true })   record as returned by validateRecord() in records.js
 //       -> { status: 'ok', name, created }  written; name is the stored display name ('' = none)
-//       -> { status: 'name_taken' }         another record holds that name (case-insensitive); unchanged
+//       -> { status: 'name_taken' }         another record or an account holds that name (case-insensitive); unchanged
 //       -> { status: 'no_save' }            there is no save for this id; nothing written
+//       needSave: false for an account's record ('a:' + id), which has no `saves` row. A name write takes
+//       the shared name lock (lockName) in Postgres.
 //   getRecord(id)                           -> { name, crew, build, play, deaths, pct, badges, rank, days,
 //                                                act1, full, fullDeaths, splits, bosses, at } | null
 //   board({ board, boss, crew, limit, youId })
@@ -33,7 +35,9 @@
 // several tables at once, and the memory store exposes its shared maps as store._mem.
 
 import pg from 'pg';
-import { ACCOUNT_SCHEMA, inTransaction, memoryAccountStores, pgAccountStores } from './stores/accounts.js';
+import {
+  ACCOUNT_SCHEMA, inTransaction, lockName, memoryAccountStores, pgAccountStores, recordIdForAccount,
+} from './stores/accounts.js';
 import { SLOT_SCHEMA, memorySlotStore, pgSlotStore } from './stores/slots.js';
 import { ADMIN_SCHEMA, memoryAdminStores, pgAdminStores } from './stores/admin.js';
 
@@ -119,12 +123,15 @@ export function createMemoryStore() {
       feedback.push({ createdAt: Date.now(), text, build, platform, progress, contact });
     },
 
-    async putRecord(id, rec) {
-      if (!saves.has(id)) return { status: 'no_save' };
+    async putRecord(id, rec, { needSave = true } = {}) {
+      if (needSave && !saves.has(id)) return { status: 'no_save' };
       const existing = records.get(id);
       if (rec.name !== undefined && rec.nameKey !== '') {
         for (const [otherId, other] of records) {
           if (otherId !== id && other.nameKey === rec.nameKey) return { status: 'name_taken' };
+        }
+        for (const a of mem.accounts.values()) {
+          if (recordIdForAccount(a.id) !== id && a.nameKey === rec.nameKey) return { status: 'name_taken' };
         }
       }
       const t = Date.now();
@@ -259,7 +266,7 @@ const PUT_RECORD_SQL = `
   SELECT $1::text, COALESCE($2::text, ''), COALESCE($3::text, ''), COALESCE($4::text, ''), $5::text,
          $6::int, $7::int, $8::smallint, $9::smallint, $10::smallint, $11::smallint,
          $12::int, $13::int, $14::int, $15::jsonb, $16::jsonb
-   WHERE EXISTS (SELECT 1 FROM saves WHERE id = $1::text)
+   WHERE (NOT $17::boolean OR EXISTS (SELECT 1 FROM saves WHERE id = $1::text))
   ON CONFLICT (id) DO UPDATE SET
     name = COALESCE($2::text, r.name),
     name_key = COALESCE($3::text, r.name_key),
@@ -390,18 +397,34 @@ export function createPgStore(databaseUrl) {
       );
     },
 
-    async putRecord(id, rec) {
+    async putRecord(id, rec, { needSave = true } = {}) {
       const keepName = rec.name === undefined;
+      const params = [
+        id,
+        keepName ? null : rec.name,
+        keepName ? null : rec.nameKey,
+        rec.crew === undefined ? null : rec.crew,
+        rec.build, rec.play, rec.deaths, rec.pct, rec.badges, rec.rank, rec.days,
+        rec.act1, rec.full, rec.fullDeaths,
+        JSON.stringify(rec.splits), JSON.stringify(rec.bosses), needSave,
+      ];
       try {
-        const { rows } = await pool.query(PUT_RECORD_SQL, [
-          id,
-          keepName ? null : rec.name,
-          keepName ? null : rec.nameKey,
-          rec.crew === undefined ? null : rec.crew,
-          rec.build, rec.play, rec.deaths, rec.pct, rec.badges, rec.rank, rec.days,
-          rec.act1, rec.full, rec.fullDeaths,
-          JSON.stringify(rec.splits), JSON.stringify(rec.bosses),
-        ]);
+        let rows;
+        if (keepName || rec.nameKey === '') {
+          ({ rows } = await pool.query(PUT_RECORD_SQL, params));
+        } else {
+          // Setting a name: under the shared name lock, and not one an account holds (accounts have their own
+          // unique index, so the records index alone cannot see them).
+          rows = await inTransaction(pool, async (c) => {
+            await lockName(c, rec.nameKey);
+            const taken = await c.query(
+              `SELECT 1 FROM accounts WHERE name_key = $1 AND ('a:' || id::text) <> $2 LIMIT 1`, [rec.nameKey, id],
+            );
+            if (taken.rows.length > 0) return null;
+            return (await c.query(PUT_RECORD_SQL, params)).rows;
+          });
+          if (rows === null) return { status: 'name_taken' };
+        }
         if (rows.length === 0) return { status: 'no_save' };
         return { status: 'ok', name: rows[0].name, created: rows[0].created === true };
       } catch (err) {
