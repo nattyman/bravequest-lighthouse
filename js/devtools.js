@@ -153,6 +153,8 @@ const STARTS=[
   {id:'north-lived',name:'He lived',sub:'After the ending where his father lives · he keeps a true light now',group:'The north island'},
   {id:'north-died',name:'He died',sub:'After the ending where his father dies · the fire is out',group:'The north island'},
   {id:'companions',name:'Companions',sub:'Loop running · Ember and Corvin with you · on the moor by the hollow log',group:'Companions',main:false},
+  {id:'cliffs-sandbar',name:'Under the south cliff',sub:'Loop running, low tide · on the sand bar at the foot of the cliff, looking up the face',group:'The cliffs'},
+  {id:'cliffs-lip',name:'The cliff edge',sub:'Loop running · on the headland at the east edge, the sea and the stacks below',group:'The cliffs'},
   {id:'testsave',name:'Continue test save',sub:'',group:'Saves',test:true}
 ];
 DT.starts=STARTS;
@@ -373,6 +375,12 @@ function runStart0(id){
   if(/^undercroft/.test(id)){ F.begin(undercroftSave(id)); undercroftEnter(id); return; }
   if(/^temple/.test(id)){ F.begin(templeSave(id)); templeEnter(id); return; }
   if(isNorth(id)){ F.begin(northSave(id)); northEnter(id); return; }
+  if(id==='cliffs-sandbar'||id==='cliffs-lip'){ // a good look at the headland's rock: from the dry bar below, or from the top
+    const low=id==='cliffs-sandbar', s=loopSave({lantern:true});
+    s.pos=low?[138,-.95,56.9]:[209,42,16]; s.yaw=low?PI:PI/2; F.begin(s);
+    if(low)setTide('low');
+    if(G.player.aimCamera)G.player.aimCamera(s.yaw,low?.1:.3);
+    return; }
   if(id==='companions'){ // companions.js: both earned (a fox and the raven freed), standing by the hollow log on the moor
     const s=loopSave({lantern:true}); const N=(G.creatures&&G.creatures.negatives)||[];
     s.freed=N.map((n,i)=>(n.kind==='raven'||(n.kind==='fox'&&i===N.findIndex(m=>m.kind==='fox')))?i:-1).filter(i=>i>=0);
