@@ -29,7 +29,7 @@ All responses are JSON with `Cache-Control: no-store`.
 | PUT | `/v1/save` | yes | `200 {ok:true, at}` | `409 {error:"stale", at}` if the stored save is as new or newer |
 | POST | `/v1/event` | no | `204` | |
 | POST | `/v1/feedback` | no | `204` | |
-| PUT | `/v1/record` | yes | `200 {ok:true, name}` | `404 {error:"no_save"}`, `409 {error:"name_taken"}`, `400 {error:"name_invalid"}` |
+| PUT | `/v1/record` | yes | `200 {ok:true, name}` | `404 {error:"no_save"}`, `409 {error:"name_taken"}`, `400 {error:"name_invalid"}`, `403 {error:"account_needed"}` (see [Accounts](#accounts)) |
 | GET | `/v1/record` | yes | `200 {name, crew, …}` | `404 {error:"no_record"}` |
 | GET | `/v1/board` | optional | `200 {b, crew, rows, you?}` | |
 
@@ -194,8 +194,8 @@ and is not GET/HEAD, and the sign-in routes that make a session (`code`, `link`,
 | PUT | `/v1/me` `{name?, password?:{new, current?}}` | `200 {ok:true, me}` | `400 name_invalid`, `409 name_taken`, `400 weak_password`, `401 bad_login`, `403 reauth` |
 | DELETE | `/v1/me` | `200 {ok:true}`, cookie cleared | `403 reauth`, `409 super` |
 
-`me` is `{id, email, name, role, tools, hasPassword, created}` (`created` in ms). The save-slot paths
-(`/v1/saves*`) and the admin API's routes answer `501 {error:"not_implemented"}` until they are built.
+`me` is `{id, email, name, role, tools, hasPassword, created}` (`created` in ms). The admin API's routes
+answer `501 {error:"not_implemented"}` until they are built.
 
 - `start` answers the same for every well-formed address (new, existing, disabled, or over its limit),
   so it never shows whether an address has an account. The link and the code expire after 15 minutes
@@ -216,10 +216,57 @@ and is not GET/HEAD, and the sign-in routes that make a session (`code`, `link`,
   `start, give, map, teleport`, plus any ticked for the account), `admin` (all six: `start, cheats, give,
   map, teleport, monsters`).
 
+**Save slots** (signed in only: guests and signed-out callers get `401 {error:"signed_out"}`; writes need
+the `X-BQ-Client` / `Origin` check above). Ten slots, numbered 1 to 10; any other slot in the path is
+`400 {error:"bad_slot"}`.
+
+| Method | Path | Success | Errors |
+| --- | --- | --- | --- |
+| GET | `/v1/saves` | `200 {max:10, slots:[{slot, name, test, at, objective, rec, updated}]}` (used slots, by number) | |
+| GET | `/v1/saves/:slot` | `200 {slot, name, test, at, objective, rec, body, updated}` | `404 no_save` |
+| PUT | `/v1/saves/:slot` | `200 {ok:true, at, test}` | `409 {error:"stale", at}`, `400 bad_request`, `413 too_large` |
+| POST | `/v1/saves/:slot/rename` `{name}` | `200 {ok:true}` | `404 no_save`, `400 bad_request` |
+| DELETE | `/v1/saves/:slot` | `200 {ok:true}` (also when the slot was empty) | |
+| POST | `/v1/saves/claim` `{code, slot?}` | `200 {ok:true, slot, name}` | `404 no_save`, `409 {error:"full"}`, `409 {error:"slot_taken"}`, `401 bad_key`, `400 bad_slot` |
+
+- **PUT** body: the `/v1/save` body, `{v:1, at, objective, save}`, with the same checks and the same 300 KB
+  limit (`v` may be left out, and `body` is accepted in place of `save`), plus optional `rec`, `name`, `test`.
+  **Newer wins, exactly as `PUT /v1/save`**: if the slot holds a save whose `at` is as new or newer, nothing is
+  written (not the name, `rec` or `test` either) and the answer is `409 {error:"stale", at:<the stored at>}`.
+  `rec` is the slot list's summary: `{play?, pct?, rank?, ri?}`, each a number, a string of at most 40
+  characters or `null` (other keys are dropped); left out, the stored one is kept. `name` (1 to 24 characters
+  after trimming, no control characters): left out, the stored one, else `Save <slot>`. `test` (boolean) is
+  sticky: once a slot is a test save it stays one until the slot is deleted; the answer's `test` says what
+  is stored. `updated` (ms) is when the server last wrote the slot; `at` is the game's own save time.
+- **Claim** moves the guest save stored under the sync code `code` into `slot` (1 to 10; the first free slot
+  when left out), all in one transaction: the guest's board record is merged into the account's (the
+  Act 1, full-game, boss times and the deaths of a finished run keep the lower value; build, play, deaths,
+  completion, badges, rank, days and splits come from whichever record was uploaded last; the crew is the
+  account's unless it has none), the guest's keeper name moves to the account if the account has none
+  (and nobody else holds it), and the guest's save and record are deleted, so the code is retired. The
+  answer's `name` is the account's keeper name afterwards (`""` if none). A code with no save is `404
+  no_save` and counts as a failed lookup, in the same budget as `GET /v1/save` (30 an hour per client: past
+  it both answer 429); claims are also limited to 20 an hour per client and per account. A malformed code is
+  `401 bad_key`, as on the guest routes.
+
+**Records and boards with an account.** `PUT /v1/record`, `GET /v1/record` and `GET /v1/board` follow the
+same rule as everything else: a live session cookie wins over a Bearer code. For an account the record's
+id is `a:<account id>`; it needs no guest save, but at least one save slot that is not a test save (`404
+no_save` otherwise). `name` in the body sets the account's keeper name (the same as `PUT /v1/me`, so the two
+never disagree; `409 name_taken` writes nothing); the answer's `name` is the keeper name. A body with
+`test:true` is `400 bad_request`. On boards, `you` is the account's. Cookie writes need the request check.
+
+For guests nothing changes, except that **while accounts are on a guest cannot take a new name**: a `PUT
+/v1/record` whose `name` is not `""` is `403 {error:"account_needed"}` (nothing written) unless the guest's
+record already has that name (any case). A guest who has a name keeps it, may send it again, and may clear
+it with `""` (after which a new one needs an account). While accounts are off, guests set names as before.
+Every write of a keeper name, in records or accounts, takes the same lock in Postgres, so a name cannot be
+taken twice by a guest and an account at once.
+
 **Limits** (in memory, per process; all in `src/accounts/limits.js`): `start` 5 an hour per address
 (over it: the usual answer, no email) and 20 an hour per client; `code` + `link` 60 per 15 minutes per
 client; `password` 10 per 15 minutes per address and client, 30 per client; `/v1/me` and `signout` 120 a
-minute per client. Every `429` has `Retry-After`.
+minute per client; `/v1/saves*` 120 a minute per client; claims as above. Every `429` has `Retry-After`.
 
 **Email** goes through Resend's API (`RESEND_API_KEY`, `MAIL_FROM`). A failed send is logged as one
 line without the address, and does not change any answer. The service never logs addresses, tokens,
@@ -345,7 +392,7 @@ src/accounts/context.js      sessions, cookies, request checks, the owner resolv
 src/accounts/crypto.js       tokens, hashes, scrypt passwords (with a concurrency cap)
 src/accounts/mailer.js       Resend sender and the fake one; emails.js: the three emails
 src/accounts/auth-routes.js  /v1/auth/* and /v1/me
-src/accounts/saves-routes.js /v1/saves*
+src/accounts/saves-routes.js /v1/saves* (slots and claim)
 src/accounts/admin-routes.js /admin/v1/* and its guard
 test/          node --test suites
 ```
