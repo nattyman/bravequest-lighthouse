@@ -5,11 +5,15 @@
 
 import { parseBoardQuery, validateRecord } from './records.js';
 import {
-  MAX_SAVE_BODY_BYTES, MAX_SMALL_BODY_BYTES, TOO_LARGE, clientIp, ipBucket, isOptStr, isStr, keyFromRequest,
+  MAX_SAVE_BODY_BYTES, MAX_SMALL_BODY_BYTES, TOO_LARGE, clientIp, createLimiter, ipBucket, isOptStr, isStr, keyFromRequest,
   normaliseKey, parseJsonObject, readBody, saveIdForKey, validateSave,
 } from './http.js';
+import { createAccountsContext } from './accounts/context.js';
+import { authRoutes } from './accounts/auth-routes.js';
+import { savesRoutes } from './accounts/saves-routes.js';
+import { adminGuard, adminRoutes, isAdminPath } from './accounts/admin-routes.js';
 
-export { normaliseKey, saveIdForKey };
+export { createLimiter, normaliseKey, saveIdForKey };
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -86,6 +90,10 @@ export function compileOrigins(input) {
   return {
     invalid,
     size: exact.size + patterns.length,
+    /** True only for an origin listed exactly (no `*`): the only ones that may send cookies. */
+    isExact(origin) {
+      return typeof origin === 'string' && origin.length <= 300 && exact.has(origin.toLowerCase());
+    },
     test(origin) {
       if (typeof origin !== 'string' || origin.length > 300) return false;
       const o = origin.toLowerCase();
@@ -95,68 +103,7 @@ export function compileOrigins(input) {
 }
 
 // ---------------------------------------------------------------------------
-// Rate limiting (fixed window, in memory, per key)
-
-export function createLimiter({ max, windowMs }, now = Date.now, maxKeys = 100_000) {
-  const buckets = new Map(); // key -> { count, resetAt }
-  let lastPrune = now();
-
-  function prune(t) {
-    for (const [key, b] of buckets) if (b.resetAt <= t) buckets.delete(key);
-    // Hard cap so a flood of distinct addresses cannot grow the map without bound:
-    // drop the oldest entries (Map iterates in insertion order).
-    if (buckets.size > maxKeys) {
-      let excess = buckets.size - maxKeys;
-      for (const key of buckets.keys()) {
-        buckets.delete(key);
-        if (--excess <= 0) break;
-      }
-    }
-    lastPrune = t;
-  }
-
-  function live(key, t) {
-    if (t - lastPrune >= Math.min(windowMs, MINUTE) || buckets.size > maxKeys) prune(t);
-    const b = buckets.get(key);
-    if (b && b.resetAt > t) return b;
-    if (b) buckets.delete(key);
-    return null;
-  }
-
-  const retryAfter = (b, t) => Math.max(1, Math.ceil((b.resetAt - t) / 1000));
-
-  return {
-    /** Counts one hit. { ok: false, retryAfter } when the window is already full. */
-    take(key) {
-      const t = now();
-      let b = live(key, t);
-      if (!b) {
-        b = { count: 0, resetAt: t + windowMs };
-        buckets.set(key, b);
-      }
-      if (b.count >= max) return { ok: false, retryAfter: retryAfter(b, t) };
-      b.count += 1;
-      return { ok: true };
-    },
-    /** Like take() but does not count. */
-    check(key) {
-      const t = now();
-      const b = live(key, t);
-      if (b && b.count >= max) return { ok: false, retryAfter: retryAfter(b, t) };
-      return { ok: true };
-    },
-    /** Gives back one hit taken in the current window. */
-    refund(key) {
-      const b = live(key, now());
-      if (b && b.count > 0) b.count -= 1;
-    },
-    get size() {
-      return buckets.size;
-    },
-    prune: () => prune(now()),
-  };
-}
-
+// Body validation
 
 function validateEvent(body) {
   if (!body) return null;
@@ -181,6 +128,32 @@ function validateFeedback(body) {
     progress: body.progress ?? '',
     contact: body.contact ?? '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Account routes (Spec: ACCOUNTS.md). Route modules return [{ method ('*' = any), path | match, run }].
+
+/** The paths behind the accounts switch: 503 accounts_off while accounts are off. */
+export const isAccountPath = (path) =>
+  path === '/v1/me' || path === '/v1/auth' || path.startsWith('/v1/auth/') ||
+  path === '/v1/saves' || path.startsWith('/v1/saves/');
+
+function findRoute(list, method, path) {
+  const methods = new Set();
+  for (const r of list) {
+    let params = null;
+    if (r.path !== undefined) {
+      if (r.path !== path) continue;
+      params = {};
+    } else {
+      const m = r.match.exec(path);
+      if (!m) continue;
+      params = { ...(m.groups ?? {}) };
+    }
+    if (r.method === '*' || r.method === method) return { route: r, params };
+    methods.add(r.method);
+  }
+  return { methods: [...methods] };
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +193,30 @@ export function createApp({ store, config = {} }) {
     send(res, 429, { error: 'rate_limited' }, { 'Retry-After': String(verdict.retryAfter) });
 
   const tooLarge = (res) => send(res, 413, { error: 'too_large' }, { Connection: 'close' });
+
+  // Accounts. Without config.accounts the service is exactly the guest-only service (no account paths at all);
+  // index.js always passes it, so in production the account paths exist and answer 503 while switched off.
+  const accounts = config.accounts
+    ? createAccountsContext({ store, accounts: config.accounts, origins, now, log })
+    : null;
+  const accountRouteList = accounts ? [...authRoutes(accounts), ...savesRoutes(accounts)] : [];
+  const adminRouteList = accounts ? adminRoutes(accounts) : [];
+
+  async function dispatch(list, req, res, path, query, extra = {}) {
+    const found = findRoute(list, req.method, path);
+    if (!found.route) {
+      if (found.methods.length === 0) return send(res, 404, { error: 'not_found' });
+      return send(res, 405, { error: 'method_not_allowed' }, { Allow: [...found.methods, 'OPTIONS'].join(', ') });
+    }
+    const ip = ipBucket(clientIp(req, trustProxy));
+    return found.route.run(req, res, { ip, params: found.params, query, ...extra });
+  }
+
+  async function routeAdmin(req, res, path, query) {
+    const g = adminGuard(accounts, req);
+    if (g.error) return send(res, g.status, { error: g.error });
+    return dispatch(adminRouteList, req, res, path, query, { adminEmail: g.adminEmail });
+  }
 
   async function health(res) {
     let timer;
@@ -359,17 +356,36 @@ export function createApp({ store, config = {} }) {
     const allowed = ROUTES[path];
     const origin = req.headers.origin;
 
+    // The private admin API answers for its whole prefix before CORS (it is never for browsers).
+    if (accounts && isAdminPath(path)) return routeAdmin(req, res, path, query);
+    const accountPath = accounts !== null && isAccountPath(path);
+    // Account paths always, and every /v1 path while accounts are on, allow the game's X-BQ-Client header and
+    // DELETE; only exactly-listed origins (never a wildcard entry) may send cookies.
+    const accountCors = accountPath || (accounts?.enabled === true && path.startsWith('/v1/'));
+
     if (origin !== undefined) {
       if (origins.test(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
+        if (accountCors) {
+          res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-BQ-Client');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, DELETE, OPTIONS');
+          if (origins.isExact(origin)) res.setHeader('Access-Control-Allow-Credentials', 'true');
+        } else {
+          res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
+        }
         res.setHeader('Access-Control-Max-Age', '86400');
         res.setHeader('Access-Control-Expose-Headers', 'Retry-After'); // so the game can read how long to wait after a 429
       } else if (path !== '/health') {
         return send(res, 403, { error: 'origin_not_allowed' }, { Vary: 'Origin' });
       }
+    }
+
+    if (accountPath) {
+      if (method === 'OPTIONS') return send(res, 204);
+      if (!accounts.enabled) return send(res, 503, { error: 'accounts_off' });
+      return dispatch(accountRouteList, req, res, path, query);
     }
 
     if (!allowed) return send(res, 404, { error: 'not_found' });
@@ -413,5 +429,6 @@ export function createApp({ store, config = {} }) {
 
   handler.limits = limits; // exposed for tests and diagnostics
   handler.origins = origins;
+  handler.accounts = accounts; // the account context (null without config.accounts)
   return handler;
 }

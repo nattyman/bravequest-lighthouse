@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import { isIPv6 } from 'node:net';
 
+const MINUTE = 60_000;
 const KEY_RE = /^[0-9A-HJKMNP-TV-Z]{12,32}$/;
 // ---------------------------------------------------------------------------
 // Sync keys
@@ -147,3 +148,111 @@ export function validateSave(body) {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// Answers (the same as createApp's own send in app.js)
+
+/** Sends a JSON answer with Cache-Control: no-store. payload undefined = empty body. */
+export function send(res, status, payload, extraHeaders) {
+  if (res.headersSent) return;
+  res.statusCode = status;
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (extraHeaders) for (const [k, v] of Object.entries(extraHeaders)) res.setHeader(k, v);
+  if (payload === undefined) {
+    res.end();
+    return;
+  }
+  const text = JSON.stringify(payload);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Length', Buffer.byteLength(text));
+  res.end(text);
+}
+
+/** 429 with Retry-After (seconds) from a limiter verdict { retryAfter }. */
+export const sendLimited = (res, verdict) =>
+  send(res, 429, { error: 'rate_limited' }, { 'Retry-After': String(verdict.retryAfter) });
+
+export const sendTooLarge = (res) => send(res, 413, { error: 'too_large' }, { Connection: 'close' });
+
+/**
+ * Reads a small JSON object body. Answers 413 / 400 itself and returns null in that case, else the object.
+ * An empty body is {} when allowEmpty is set.
+ */
+export async function readJsonBody(req, res, { limit = MAX_SMALL_BODY_BYTES, allowEmpty = false } = {}) {
+  const raw = await readBody(req, limit);
+  if (raw === TOO_LARGE) {
+    sendTooLarge(res);
+    return null;
+  }
+  if (allowEmpty && raw.length === 0) return {};
+  const body = parseJsonObject(raw);
+  if (!body) {
+    send(res, 400, { error: 'bad_request' });
+    return null;
+  }
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting (fixed window, in memory, per key)
+
+export function createLimiter({ max, windowMs }, now = Date.now, maxKeys = 100_000) {
+  const buckets = new Map(); // key -> { count, resetAt }
+  let lastPrune = now();
+
+  function prune(t) {
+    for (const [key, b] of buckets) if (b.resetAt <= t) buckets.delete(key);
+    // Hard cap so a flood of distinct addresses cannot grow the map without bound:
+    // drop the oldest entries (Map iterates in insertion order).
+    if (buckets.size > maxKeys) {
+      let excess = buckets.size - maxKeys;
+      for (const key of buckets.keys()) {
+        buckets.delete(key);
+        if (--excess <= 0) break;
+      }
+    }
+    lastPrune = t;
+  }
+
+  function live(key, t) {
+    if (t - lastPrune >= Math.min(windowMs, MINUTE) || buckets.size > maxKeys) prune(t);
+    const b = buckets.get(key);
+    if (b && b.resetAt > t) return b;
+    if (b) buckets.delete(key);
+    return null;
+  }
+
+  const retryAfter = (b, t) => Math.max(1, Math.ceil((b.resetAt - t) / 1000));
+
+  return {
+    /** Counts one hit. { ok: false, retryAfter } when the window is already full. */
+    take(key) {
+      const t = now();
+      let b = live(key, t);
+      if (!b) {
+        b = { count: 0, resetAt: t + windowMs };
+        buckets.set(key, b);
+      }
+      if (b.count >= max) return { ok: false, retryAfter: retryAfter(b, t) };
+      b.count += 1;
+      return { ok: true };
+    },
+    /** Like take() but does not count. */
+    check(key) {
+      const t = now();
+      const b = live(key, t);
+      if (b && b.count >= max) return { ok: false, retryAfter: retryAfter(b, t) };
+      return { ok: true };
+    },
+    /** Gives back one hit taken in the current window. */
+    refund(key) {
+      const b = live(key, now());
+      if (b && b.count > 0) b.count -= 1;
+    },
+    get size() {
+      return buckets.size;
+    },
+    prune: () => prune(now()),
+  };
+}
