@@ -975,12 +975,12 @@ describe('nothing sensitive in the logs', () => {
 
 // ---------------------------------------------------------------------------
 describe('stubs for the save-slot and admin routes', () => {
-  test('/v1/saves* answers 501 while accounts are on', async () => {
+  test('/v1/saves* is built now (test/slots.test.js): signed out it answers 401 signed_out', async () => {
     const s = await startAccounts();
     try {
       for (const [method, path] of [['GET', '/v1/saves'], ['GET', '/v1/saves/3'], ['PUT', '/v1/saves/3'], ['POST', '/v1/saves/claim']]) {
         const r = await s.api(path, { method, body: method === 'GET' ? undefined : {} });
-        assert.deepEqual([r.status, r.body], [501, { error: 'not_implemented' }], `${method} ${path}`);
+        assert.deepEqual([r.status, r.body], [401, { error: 'signed_out' }], `${method} ${path}`);
       }
     } finally {
       await s.close();

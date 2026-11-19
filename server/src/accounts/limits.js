@@ -48,6 +48,12 @@ export const ACCOUNT_LIMITS = Object.freeze({
   // Not in the spec's list, added so sign-in ids and link tokens cannot be sprayed from one address:
   attemptsPerIp: { max: 60, windowMs: 15 * MINUTE }, // POST /v1/auth/code + /v1/auth/link, per client
   me: { max: 120, windowMs: MINUTE }, // GET/PUT/DELETE /v1/me and /v1/auth/signout, per client
+  slots: { max: 120, windowMs: MINUTE }, // every /v1/saves* request, per client
+  // POST /v1/saves/claim takes a sync code, so it must not become a way to guess codes. Every claim counts
+  // here; a claim whose code has no save also counts as a failed lookup in the guest GET /v1/save budget
+  // (DEFAULT_LIMITS.failedLookups in app.js), and an address locked out there is locked out here too.
+  claimsPerIp: { max: 20, windowMs: HOUR },
+  claimsPerAccount: { max: 20, windowMs: HOUR },
 });
 
 /** The test panel's tool groups, in the order the panel shows them. */
@@ -58,7 +64,7 @@ export const ROLES = Object.freeze(['player', 'tester', 'admin']);
 export const STATUSES = Object.freeze(['active', 'disabled']);
 
 /** Account save slots. */
-export const SLOTS = Object.freeze({ max: 10, nameChars: 24 });
+export const SLOTS = Object.freeze({ max: 10, nameChars: 24, recChars: 40 });
 
 export const MAX_EMAIL_CHARS = 254;
 /** The private admin API's key must be at least this long, or the admin API stays off. */
