@@ -133,3 +133,41 @@ if (!url) {
     }
   });
 }
+
+if (url) {
+  test('postgres over HTTP: sign in by code, name, password, renewal, sign out everywhere, delete', async () => {
+    const { startAccounts, freshEmail, tick, sha256 } = await import('./_accounts.js');
+    const { createHasher } = await import('../src/accounts/crypto.js');
+    const store = createPgStore(url);
+    await store.init();
+    const s = await startAccounts({ store, accounts: { hasher: createHasher({ params: { N: 1024, r: 8, p: 1, keyLen: 32, saltBytes: 16 } }) } });
+    try {
+      const email = freshEmail();
+      const st = await s.api('/v1/auth/start', { method: 'POST', body: { email } });
+      await tick();
+      const msg = s.mailer.last(email);
+      const wrong = s.codeFrom(msg) === '000000' ? '111111' : '000000';
+      assert.deepEqual((await s.api('/v1/auth/code', { method: 'POST', body: { id: st.body.id, code: wrong } })).body, { error: 'bad_code', left: 4 });
+      const r = await s.api('/v1/auth/code', { method: 'POST', body: { id: st.body.id, code: s.codeFrom(msg) } });
+      assert.equal(r.status, 200);
+      assert.equal((await s.api('/v1/auth/link', { method: 'POST', body: { token: s.tokenFrom(msg) } })).status, 410);
+      const name = `Pg${randomBytes(4).toString('hex')}`;
+      assert.equal((await s.api('/v1/me', { method: 'PUT', cookie: r.token, body: { name, password: { new: 'postgres long password' } } })).body.me.name, name);
+      const pw = await s.api('/v1/auth/password', { method: 'POST', body: { email, password: 'postgres long password' } });
+      assert.equal(pw.status, 200);
+      s.clock.advance(86_400_000 + 1000);
+      const renewed = await s.api('/v1/me', { cookie: pw.token });
+      assert.ok(renewed.cookie);
+      assert.equal((await store.sessions.get(sha256(pw.token))).expiresAt, s.clock.t + 60 * 86_400_000);
+      assert.equal((await s.api('/v1/auth/signout', { method: 'POST', cookie: pw.token, body: { everywhere: true } })).status, 200);
+      assert.equal((await s.api('/v1/me', { cookie: r.token })).status, 401);
+      const again = await s.signIn(email);
+      const del = await s.api('/v1/me', { method: 'DELETE', cookie: again.token });
+      assert.equal(del.status, 200);
+      assert.equal(await store.accounts.byEmail(email), null);
+    } finally {
+      await s.close();
+      await store.close();
+    }
+  });
+}

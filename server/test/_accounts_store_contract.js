@@ -237,7 +237,7 @@ export function runAccountStoreContract(label, getStore) {
     const s = getStore();
     const a = await s.accounts.signIn(uniqueEmail(), { at: T0 });
     const action = `test-${randomBytes(4).toString('hex')}`;
-    const far = 4_000_000_000_000 + Math.floor(Math.random() * 1e9); // newer than anything else in a shared database
+    const far = 4_000_000_000_000 + Date.now() * 2; // later than any earlier run's rows in a shared database
     await s.audit.add({ at: far, adminEmail: 'boss@example.test', action, accountId: a.id, detail: { role: 'tester' } });
     await s.audit.add({ at: far + 1, adminEmail: 'boss@example.test', action, accountId: null });
     const page = await s.audit.list({ page: 1, per: 2 });
