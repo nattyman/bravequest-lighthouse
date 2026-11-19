@@ -28,7 +28,7 @@
 // sub-objects, each documented in its module:
 //   store.accounts, store.sessions, store.signIns   src/stores/accounts.js
 //   store.slots                                     src/stores/slots.js
-//   store.audit, store.settings                     src/stores/admin.js
+//   store.audit, store.settings, store.admin        src/stores/admin.js
 // The Postgres store also exposes store.tx(fn) (fn(client) inside a transaction) for routes that need
 // several tables at once, and the memory store exposes its shared maps as store._mem.
 

@@ -253,4 +253,39 @@ export function runAccountStoreContract(label, getStore) {
     await s.settings.set(key, { x: 1 });
     assert.deepEqual(await s.settings.get(key), { x: 1 });
   });
+  test(`${label}: admin.listAccounts: q on email or keeper name (any case, literal), role, status, paging, newest first, saves`, async () => {
+    const s = getStore();
+    const tag = `z${randomBytes(4).toString('hex')}`; // keeps this run's rows apart in a shared database
+    const mk = async (i, at) => s.accounts.signIn(`${tag}-${i}@example.test`, { at });
+    const a = await mk(1, T0 + 1);
+    const b = await mk(2, T0 + 3);
+    const c = await mk(3, T0 + 2);
+    const named = await s.accounts.signIn(`other${randomBytes(4).toString('hex')}@example.test`, { at: T0 + 4 });
+    const n = `Q${randomBytes(5).toString("hex")}`.slice(0, 12);
+    assert.equal((await s.accounts.setName(named.id, { name: n, key: n.toLowerCase() })).status, 'ok');
+    await s.accounts.update(b.id, { role: 'tester' });
+    await s.accounts.update(c.id, { status: 'disabled' });
+    await s.slots.put(a.id, 1, { at: 1, objective: '', body: 'x' }, { updatedAt: T0 });
+    await s.slots.put(a.id, 4, { at: 1, objective: '', body: 'y' }, { updatedAt: T0 });
+
+    const all = await s.admin.listAccounts({ q: tag.toUpperCase() });
+    assert.equal(all.total, 3);
+    assert.deepEqual(all.rows.map((r) => r.id), [b.id, c.id, a.id]);
+    assert.deepEqual(all.rows[2], {
+      id: a.id, email: a.email, displayName: '', role: 'player', status: 'active', createdAt: T0 + 1, lastSeenAt: T0 + 1, saves: 2,
+    });
+    assert.equal(all.rows[0].saves, 0);
+    // The keeper name matches too, ignoring case; % and _ are literal.
+    assert.deepEqual((await s.admin.listAccounts({ q: n.slice(1).toLowerCase() })).rows.map((r) => r.id), [named.id]);
+    assert.equal((await s.admin.listAccounts({ q: `${tag}%` })).total, 0);
+    assert.equal((await s.admin.listAccounts({ q: `${tag}_1` })).total, 0);
+    assert.deepEqual((await s.admin.listAccounts({ q: tag, role: 'tester' })).rows.map((r) => r.id), [b.id]);
+    assert.deepEqual((await s.admin.listAccounts({ q: tag, status: 'disabled' })).rows.map((r) => r.id), [c.id]);
+    assert.deepEqual((await s.admin.listAccounts({ q: tag, role: 'player', status: 'active' })).rows.map((r) => r.id), [a.id]);
+    const p2 = await s.admin.listAccounts({ q: tag, page: 2, per: 2 });
+    assert.deepEqual([p2.total, p2.rows.map((r) => r.id)], [3, [a.id]]);
+    assert.deepEqual((await s.admin.listAccounts({ q: tag, page: 9, per: 2 })).rows, []);
+    const everyone = await s.admin.listAccounts({ per: 500 });
+    assert.ok(everyone.total >= 4 && everyone.rows.length <= 200);
+  });
 }
