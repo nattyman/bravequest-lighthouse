@@ -43,7 +43,7 @@ This is the working process for any Claude thread (lead or agent) picking up thi
 - **Never use bare `git stash`** (the stash stack is shared across worktrees and sessions). To set work
   aside, make a temporary WIP commit.
 - **Containers restart.** Long agent runs have been killed mid-task. Protect in-progress work with a WIP
-  commit and push the branch: pushing a branch that has no PR runs no CI and costs nothing.
+  commit and push the branch: pushing a branch that has no PR starts no CI run by itself.
 - **Don't merge PRs.** Heath merges. Don't cancel or rerun CI runs you didn't start.
 
 ## Pull requests and the GitHub API
@@ -64,7 +64,8 @@ not internal names.
 
 ## Testing
 
-- **Run suites yourself**, one at a time, never several in parallel (they starve each other and time out):
+- **Run the full set on GitHub** (see CI below). **Locally, run suites one at a time**, never several in
+  parallel (they starve each other and time out):
   ```sh
   python3 test/build_dev.py                     # dev.html is generated; never edit it by hand
   python3 -m http.server 8996 &                 # pick a free port; stop the server afterwards
@@ -86,8 +87,19 @@ not internal names.
 - The repo is **public**, so GitHub's standard runners are free. All suites run side by side on
   `ubuntu-latest` in roughly 13 minutes.
 - **No self-hosted runners** (on a public repo anyone's PR could run code on them).
-- CI runs on pull requests and on pushes to main. Don't use manual workflow runs as a test machine for
-  unfinished work; test locally. (`workflow_dispatch` takes a `suites` input for targeted reruns.)
+- CI runs on pull requests and on pushes to main, and by hand on any branch. **Use it as your test machine**,
+  for unfinished work too: it costs nothing and is far quicker than running the long suites one at a time
+  locally. Push the branch, then start the `tests` workflow on it (blank `suites` = all):
+  ```sh
+  gh api -X POST repos/nattyman/bravequest-lighthouse/actions/workflows/tests.yml/dispatches \
+    -f ref=feat/x -f 'inputs[suites]=cave_e2e,map_e2e'
+  gh api "repos/nattyman/bravequest-lighthouse/actions/runs?branch=feat/x&per_page=5" \
+    --jq '.workflow_runs[]|"\(.id) \(.event) \(.status) \(.conclusion)"'
+  ```
+  A new run on the same branch cancels the one before it. Local runs are still right for the suite or two
+  that covers what you just changed, and for screenshots.
+  (Runs were rationed while the game lived in a private repo, where minutes cost money. That is why the game
+  moved to this public repo; the private studio repo is still the place to go easy on workflows.)
 
 ## Publishing
 
@@ -148,4 +160,5 @@ python3 test/build_release.py --api https://<save service> --version 0.9.0-beta.
 
 - He may not be watching; lead with what he'll see and what he needs to do, in plain words.
 - Say plainly what's weak or untested. Don't present an unverified result as done.
-- Ask before anything that costs him money or can't be undone (CI spend, publishing live, repo settings).
+- Ask before anything that costs him money or can't be undone (publishing live, repo settings, paid
+  services). CI runs on this public repo are free.
