@@ -112,6 +112,13 @@ W.walkable=(x,z)=>{
   return true;
 };
 W.plateauY=TOP;
+/* read-only views of the headland shaping, for the cliff skin and its dressing (cliffs.js): the plateau's signed distance
+   (positive on top), the sea-cliff test the walk rule uses, the ground before the headland is raised, and the distance
+   to the cliff path's centreline with its half width and bank */
+W.plateauSD=plateauSD; W.seaCliff=seaCliff; W.lowland=lowland;
+W.rampDist=(x,z)=>{let b=1e9; for(let k=0;k<RSEG.length;k++){const s=RSEG[k]; let t=((x-s.ax)*s.dx+(z-s.az)*s.dz)/s.l2; t=t<0?0:t>1?1:t;
+  const px=s.ax+s.dx*t-x,pz=s.az+s.dz*t-z,d=px*px+pz*pz; if(d<b)b=d;} return Math.sqrt(b);};
+W.ramp={pts:RAMP.map(p=>p.slice()),hw:RW,bank:RB};
 W.inForest=(x)=>x<-70;
 W.onPlateau=(x,z)=>x>110&&plateauSD(x,z)>=0;
 
@@ -486,7 +493,9 @@ function bakeTreeAO(){
 }
 function buildTerrain(){
   const mat=G.toon('#ffffff',{vertexColors:true});
-  const CW=61,CD=60;
+  const CW=61,CD=60, CL=G.cliffs&&G.cliffs.pushAt?G.cliffs:null;
+  // round the headland the ground shares the cliff rock: painted stone shows through wherever the slope turns steep
+  let rmat=null; if(G.cliffmat&&G.cliffmat.rock){ try{ rmat=G.cliffmat.rock({blend:true}); }catch(e){ console.error('cliffmat',e); } }
   // colours on the full grid (also used to tint grass)
   for(let j=0;j<GNZ;j++)for(let i=0;i<GNX;i++){
     const a=j*GNX+i,x=GX0+i,z=GZ0+j,h=HG[a];
@@ -500,17 +509,22 @@ function buildTerrain(){
     const i0=ci*CW,j0=cj*CD,nx=CW+1,nz=CD+1;
     let maxH=-99; for(let j=j0;j<j0+nz;j++)for(let i=i0;i<i0+nx;i++)maxH=Math.max(maxH,HG[j*GNX+i]);
     if(maxH<-2.2)continue;
-    const pos=new Float32Array(nx*nz*3),nor=new Float32Array(nx*nz*3),cl=new Float32Array(nx*nz*3);
+    const pos=new Float32Array(nx*nz*3),nor=new Float32Array(nx*nz*3),cl=new Float32Array(nx*nz*3),rw=rmat?new Float32Array(nx*nz):null;
     for(let j=0;j<nz;j++)for(let i=0;i<nx;i++){
       const gi=i0+i,gj=j0+j,a=gj*GNX+gi,k=j*nx+i,x=GX0+gi,z=GZ0+gj,h=HG[a];
       const hl=HG[a-(gi>0?1:0)],hr=HG[a+(gi<GNX-1?1:0)],hu=HG[a-(gj>0?GNX:0)],hd=HG[a+(gj<GNZ-1?GNX:0)];
       const gx=(hr-hl)*.5,gz=(hd-hu)*.5,sl=Math.hypot(gx,gz);
-      let px=x,pz=z;
-      if(sl>1.6){ // crag the steep faces sideways a little (visual only)
+      let px=x,pz=z, pu=CL&&x>95&&sl>.3?CL.pushAt(x,z,h):0;
+      if(pu>0){ px+=gx/sl*pu; pz+=gz/sl*pu; } // under the cliff skin: tuck the face back into the rock (visual only)
+      else if(sl>1.6){ // crag the steep faces sideways a little (visual only)
         const c=(vnoise(x*.4+h*.3,z*.4-h*.2)-.5)*1.6*smooth(1.6,3,sl); px-=gx/sl*c; pz-=gz/sl*c;}
       pos[k*3]=px;pos[k*3+1]=h;pos[k*3+2]=pz;
       _n.set(-gx,1,-gz).normalize(); nor[k*3]=_n.x;nor[k*3+1]=_n.y;nor[k*3+2]=_n.z;
-      cl[k*3]=HC[a*3];cl[k*3+1]=HC[a*3+1];cl[k*3+2]=HC[a*3+2];
+      const dk=1-pu*.25; cl[k*3]=HC[a*3]*dk;cl[k*3+1]=HC[a*3+1]*dk;cl[k*3+2]=HC[a*3+2]*dk;
+      if(rw&&x>92){ // how much bare rock shows here: steep ground, and a broken rocky rim just under the plateau edge; never on the trail
+        let r=smooth(.7,1.35,sl); if(x>108&&h>35&&h<41.97)r=Math.max(r,smooth(.12,.45,sl)*(.55+.45*smooth(37,40.5,h)));
+        if(x>108&&h>=41.97)for(const [dd,wv] of [[1,.95],[2,.68]])for(const o of [dd,-dd,dd*GNX,-dd*GNX]){ const b=a+o; if(b>=0&&b<HG.length&&HG[b]<39)r=Math.max(r,wv); }   // rock breaking the turf along the rim
+        rw[k]=r*smooth(1.3,2.8,pathDist(x,z)); }
     }
     const idx=[];
     for(let j=0;j<nz-1;j++)for(let i=0;i<nx-1;i++){const a=j*nx+i,b=a+1,c=a+nx,d=c+1;
@@ -518,9 +532,10 @@ function buildTerrain(){
     const g=new THREE.BufferGeometry();
     g.setAttribute('position',new THREE.BufferAttribute(pos,3));
     g.setAttribute('normal',new THREE.BufferAttribute(nor,3));
-    g.setAttribute('color',new THREE.BufferAttribute(cl,3));
+    g.setAttribute('color',new THREE.BufferAttribute(cl,3)); if(rw)g.setAttribute('rockw',new THREE.BufferAttribute(rw,1));
     g.setIndex(idx); g.computeBoundingSphere();
-    const m=new THREE.Mesh(g,mat); m.receiveShadow=true; m.name='terrain'; root.add(m); tris+=idx.length/3;
+    const x1=GX0+i0+CW, z0=GZ0+j0, z1=z0+CD, hl=rmat&&x1>95&&GX0+i0<230&&z1>-90&&z0<90;
+    const m=new THREE.Mesh(g,hl?rmat:mat); m.receiveShadow=true; m.name='terrain'; root.add(m); tris+=idx.length/3;
     TCH.push({g,i0,j0,nx,nz});
   }
   W.stats.terrainTris=tris;
@@ -1701,28 +1716,87 @@ function V3(x,y,z){return new THREE.Vector3(x,y,z);}
 G.system('wreck',{order:1,modes:'always',init(){ try{ buildWreck(); }catch(e){ console.error('wreck',e); } }});
 
 /* ---------- sea stacks & spires ---------- */
+/* each stack is a pile of bedded drums: an irregular polygon per bed that steps in at every bed top (a ledge, with a notch
+   cut under the next bed), split by a few vertical clefts, tapering and leaning as it rises, with a mossy, bird-whitened
+   crown. One leans hard and one splits into twin spires. Flat facets so the cel bands catch every face. */
+function stackGeo(x,z,rad,hh,seed,o){
+  const r=rnd(seed), S=o.sectors, per=o.per, pos=[], tg=[];
+  const lean=o.lean||0, la=o.la!=null?o.la:r()*TAU, lx=Math.cos(la)*lean*hh, lz=Math.sin(la)*lean*hh, y0=o.y0==null?-4.5:o.y0, base=y0;
+  // sectors round the stack (joint-bounded columns), bedding planes up it
+  const sec=[]; { let a=r()*TAU, tot=0; const ws=[]; for(let i=0;i<S;i++){const w=.6+r();ws.push(w);tot+=w;}
+    for(let i=0;i<S;i++){ sec.push({a0:a,w:ws[i]/tot*TAU,jd:.12+r()*.22}); a+=ws[i]/tot*TAU; } }
+  const led=[]; { let y=y0+2.5+r()*3; while(y<hh-3){ led.push(y); y+=o.gap[0]+r()*o.gap[1]; } }
+  const NS=led.length+1, val=[], J=[];
+  for(let i=0;i<S;i++){ val.push([]); J.push([]); let on=r()<.6;
+    for(let j=0;j<NS;j++){ let v=.72+r()*.42; if(j&&r()<.6)v=val[i][j-1]; val[i].push(v); if(r()<.35)on=!on; J[i].push(on); } }
+  const tops=sec.map(()=>hh-r()*rad*.9), dk=.1+r()*.12, dph=r()*TAU;   // the bedding dips: every ledge on the stack tilts the same way
+  // rings: every bedding plane gets an edge ring and a notch ring; fill rings between
+  const ys=[]; { let y=y0; for(const L of led){ const n=Math.max(0,Math.ceil((L-.3-y)/o.dy)-1); for(let k=1;k<=n;k++)ys.push({y:y+(L-.3-y)*k/(n+1)}); ys.push({y:L-.3,e:1},{y:L+.08,n:1}); y=L+.08; }
+    const n=Math.max(1,Math.ceil((hh-y)/o.dy)); for(let k=1;k<=n;k++)ys.push({y:y+(hh-y)*k/n,top:k===n}); ys.unshift({y:y0}); }
+  const rings=[];
+  for(const Y of ys){ const yy=Y.y, t=clamp((yy-base)/(hh-base),0,1), j=led.filter(L=>yy>L).length, ring=[];
+    const cx=x+lx*Math.pow(t,1.6), cz=z+lz*Math.pow(t,1.6), Rb=rad*(1-.5*Math.pow(t,1.25));
+    for(let i=0;i<S;i++){ const s=sec[i], ip=(i+S-1)%S;
+      for(let k=0;k<per;k++){ const a=s.a0+s.w*k/per+(k?(vnoise(i*3.1+k,j*.7+seed)-.5)*s.w*.3:0);
+        let m=val[i][j]*(1+(vnoise(a*2+seed,yy*.25)-.5)*.16);
+        if(k===0&&J[i][j])m=Math.min(m,val[ip][j])-s.jd;
+        if(Y.e)m-=.05; if(Y.n&&val[i][Math.max(0,j-1)]>val[i][j]+.04)m-=.16;
+        let yv=yy+(yy>y0+.1?dk*Rb*m*Math.cos(a-dph):0); if(Y.top){ yv=Math.min(tops[i],tops[ip])+(k?.25:0); m*=.78; }
+        ring.push([cx+Math.cos(a)*Rb*m,yv,cz+Math.sin(a)*Rb*m]); } }
+    rings.push({p:ring,j,top:!!Y.top,cx,cz}); }
+  { const L=rings[rings.length-1]; let ym=0; for(const q of L.p)ym+=q[1]; ym/=L.p.length; rings.push({p:L.p.map(()=>[L.cx,ym+rad*.12,L.cz]),j:L.j,cap:1}); }
+  const n=S*per;
+  for(let i=0;i<rings.length-1;i++){const A=rings[i].p,B=rings[i+1].p, c=rings[i+1].cap||rings[i+1].top?1:0;
+    for(let q=0;q<n;q++){const q1=(q+1)%n; pos.push(...A[q],...B[q],...A[q1]); if(!rings[i+1].cap)pos.push(...A[q1],...B[q],...B[q1]);
+      for(let v=0;v<(rings[i+1].cap?3:6);v++)tg.push(rings[i].j,c,0);}}
+  return {pos,cl:tg};
+}
 function buildStacks(){
-  const r=rnd(6060), parts=[], out=[];
+  const out=[];
   const spots=[[150,-64,9,34],[176,-60,6,26],[204,-70,8,40],[128,-58,5,18],[238,-14,10,38],[246,22,6,28],[230,48,7,22],
     [192,64,8,36],[160,68,6,24],[218,62,5,30],[136,60,7,20],[40,-104,6,16],[-60,-104,8,22],[-150,-104,6,18],
     [-256,24,9,30],[-250,-44,6,20],[-140,108,7,20],[-40,106,5,14],[262,-48,7,46],[266,60,9,52],[30,112,6,18],[-220,90,6,24]];
-  const rk=col('#6a6f80'),rk2=col('#4c5262'),moss=col('#5d6a4a'),bird=col('#ddd8cc');
   for(const [x0,z0,rad,hh] of spots){
     let x=x0,z=z0,k=0; while(height(x,z)>-3&&k<20){x*=1.04;z*=1.04;k++;}
-    const segs=Math.ceil(hh/7); let y=-4, rr=rad;
-    for(let s=0;s<segs;s++){const sh=hh/segs+2, rt=rr*(.6+r()*.25);
-      const g=new THREE.CylinderGeometry(rt,rr,sh,9,3); const P=g.attributes.position;
-      for(let i=0;i<P.count;i++){_v.fromBufferAttribute(P,i);const a=Math.atan2(_v.z,_v.x),k2=1+(vnoise(a*2.2+s*3+x,_v.y*.4+z)-.5)*.6;P.setXYZ(i,_v.x*k2,_v.y,_v.z*k2);}
-      g.computeVertexNormals();
-      const ox=(r()-.5)*rr*.4,oz=(r()-.5)*rr*.4;
-      parts.push({g,m:mat4(x+ox,y+sh/2,z+oz,(r()-.5)*.1,r()*3,(r()-.5)*.1),c:(p,n,o)=>{o.copy(rk2).lerp(rk,Math.sin(p.y*.9+vnoise(p.x,p.z)*4)*.5+.5);
-        if(n.y>.5)o.lerp(moss,.8); if(p.y>hh-6&&n.y>.2)o.lerp(bird,.25);}});
-      y+=sh-2; rr=rt;}
-    out.push({x,z,r:rad*.9});
-  }
-  const m=new THREE.Mesh(mergeParts(parts),G.toon('#ffffff',{vertexColors:true})); m.receiveShadow=true; m.name='seaStacks'; root.add(m);
+    out.push({x,z,r:rad*.9}); STK.push([x,z,rad,hh]); }
+  const m=new THREE.Mesh(stacksGeo(),null); m.receiveShadow=true; m.name='seaStacks'; root.add(m); STK.mesh=m;
+  let mat=null; if(STK.cm){ try{ mat=G.cliffmat.rock({wet:true,moss:true,strata:true}); }catch(e){ console.error('cliffmat',e); } }
+  m.material=mat||G.toon('#ffffff',{vertexColors:true});
   return out;
 }
+/* the stacks' detail follows the quality setting (their places and sizes never change) */
+const STK=[]; const STQ={high:{s:0,per:3,dy:2.6},balanced:{s:-1,per:2,dy:3.3},saver:{s:-2,per:2,dy:4.6}};
+function stacksGeo(){
+  const P=[], K=[], q=STQ[G.quality&&G.quality.level]||STQ.balanced; let si=0;
+  for(const [x,z,rad,hh] of STK){
+    const near=x>110, o=near?{sectors:(rad>6?7:6)+q.s,per:q.per,dy:q.dy,gap:[4.2,5.5]}:{sectors:5+Math.min(0,q.s+1),per:2,dy:q.dy+1.9,gap:[5,7]}, sd=6061+si*37;
+    if(si===2){o.lean=.2; o.la=Math.atan2(z,x-166)+PI/2;}   // the leaning one, off the north cliffs, tipping along the coast
+    if(si===7){                      // twin spires off the south cliffs: one broad foot, split two-thirds up
+      const ys=hh*.55, a=Math.atan2(z,x-166)+PI/2, ca=Math.cos(a)*rad*.62, sa=Math.sin(a)*rad*.62;
+      const g0=stackGeo(x,z,rad,ys,sd,o); P.push(g0.pos); K.push(g0.cl);
+      const g1=stackGeo(x+ca,z+sa,rad*.46,hh,sd+1,Object.assign({},o,{sectors:5,y0:ys-2.5,lean:.04})); P.push(g1.pos); K.push(g1.cl);
+      const g2=stackGeo(x-ca,z-sa,rad*.38,hh*.78,sd+2,Object.assign({},o,{sectors:5,y0:ys-2.5,lean:.08})); P.push(g2.pos); K.push(g2.cl);
+    } else { const g=stackGeo(x,z,rad,hh,sd,o); P.push(g.pos); K.push(g.cl); }
+    si++;
+  }
+  let n=0; for(const p of P)n+=p.length; const pos=new Float32Array(n), tag=new Float32Array(n); let o=0;
+  for(let i=0;i<P.length;i++){pos.set(P[i],o); tag.set(K[i],o); o+=P[i].length;}
+  const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3)); geo.computeVertexNormals();
+  const N=geo.attributes.normal.array, cl=new Float32Array(n), cm=STK.cm=!!(G.cliffmat&&G.cliffmat.rock);
+  const pal=[C.rock,C.rock2,C.rockWarm,col('#6f7482'),col('#4d5261')], moss=col('#45573a'), bird=col('#d6d2c6'), wet=col('#2b3236');
+  for(let v=0;v<n/3;v++){const x=pos[v*3],y=pos[v*3+1],z=pos[v*3+2],ny=N[v*3+1],bed=tag[v*3],cap=tag[v*3+1];
+    if(cm){ const a=(.82+.3*vnoise(x*.4+bed,y*.3))*(ny<-.2?.93:1); _c.setRGB(a,a,a); }
+    else{ _c.copy(C.rock).lerp(C.rock2,smooth(.4,.6,vnoise(y*.55+x*.01,z*.01))*.35).lerp(pal[(bed*3+1)%5],.18).multiplyScalar(.9+.18*vnoise(x*.4+z*.35,y*.3));
+      if(ny<-.25)_c.multiplyScalar(.72);
+      if(ny>.45||cap)_c.lerp(moss,clamp((ny-.35)*1.6,0,1)*(cap?.95:.75));
+      if(cap||(y>8&&vnoise(Math.atan2(z,x)*30,y*.08)>.72&&ny>-.3&&ny<.5))_c.lerp(bird,cap?.18:.22);
+      if(y<1.6)_c.lerp(wet,smooth(1.6,-.5,y)*.75); }
+    cl[v*3]=_c.r;cl[v*3+1]=_c.g;cl[v*3+2]=_c.b;}
+  geo.setAttribute('color',new THREE.BufferAttribute(cl,3)); geo.computeBoundingSphere();
+  W.stats.stackTris=n/9;
+  return geo;
+}
+G.on('quality',()=>{ const m=STK.mesh; if(!m)return; const g=stacksGeo(); m.geometry.dispose(); m.geometry=g; });
 
 /* ---------- glowing mushrooms ---------- */
 function buildMushrooms(){
@@ -1872,6 +1946,7 @@ function fillGrassSlot(si,cx,cz){
       else if(x<-60&&keep>lerp(1,.32,smooth(-60,-80,x)))ok=false;
       else if(h<2.4&&keep>.25)ok=false;
       else if(pathDist(x,z)<1.5)ok=false;
+      else if(x>108&&h>41.9&&keep>.2&&Math.min(gh(x+1.7,z),gh(x-1.7,z),gh(x,z+1.7),gh(x,z-1.7))<39)ok=false;   // bare rock along the rim
       else if((x-L.x)*(x-L.x)+(z-L.z)*(z-L.z)<92)ok=false;
       else if(x>140&&inFoot(x,z,.2))ok=false;
       else if(x<0&&x>-40&&inFoot(x,z,0))ok=false;
