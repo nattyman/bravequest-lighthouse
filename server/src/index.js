@@ -3,6 +3,7 @@
 import http from 'node:http';
 import { createApp } from './app.js';
 import { createMemoryStore, createPgStore } from './store.js';
+import { accountsConfigFromEnv } from './accounts/config.js';
 
 const port = Number(process.env.PORT) || 3000;
 const databaseUrl = (process.env.DATABASE_URL || '').trim();
@@ -40,7 +41,19 @@ const store = await buildStore().catch((err) => {
   process.exit(1);
 });
 
-const app = createApp({ store, config: { allowedOrigins, trustProxy } });
+const accounts = accountsConfigFromEnv(process.env);
+if (accounts.enabled) {
+  console.log(`accounts: on (mail: ${accounts.mailer.kind}${accounts.cookieInsecure ? ', cookies without Secure' : ''})`);
+  if (accounts.mailer.kind === 'fake') console.warn('WARNING: MAIL_FAKE=1: sign-in emails are kept in memory and never sent.');
+} else if ((process.env.ACCOUNTS ?? '').trim().toLowerCase() === 'on') {
+  console.warn(`WARNING: ACCOUNTS=on but accounts stay off: ${accounts.problems.filter((p) => !p.startsWith('ACCOUNTS')).join('; ')}`);
+} else {
+  console.log('accounts: off');
+}
+if (accounts.adminKeyTooShort) console.warn('WARNING: ADMIN_API_KEY is shorter than 32 characters; the admin API stays off.');
+console.log(`admin API: ${accounts.admin ? 'on' : 'off'}`);
+
+const app = createApp({ store, config: { allowedOrigins, trustProxy, accounts } });
 
 if (app.origins.invalid.length > 0) {
   console.warn(`WARNING: ignoring invalid ALLOWED_ORIGINS entries: ${app.origins.invalid.join(', ')}`);

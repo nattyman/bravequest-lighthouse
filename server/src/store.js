@@ -23,8 +23,19 @@
 //   close()
 //
 // `id` is sha256(normalised sync key) in hex. The key itself never reaches the store.
+//
+// The account tables (Spec: ACCOUNTS.md) live in their own modules and are mounted on both stores as
+// sub-objects, each documented in its module:
+//   store.accounts, store.sessions, store.signIns   src/stores/accounts.js
+//   store.slots                                     src/stores/slots.js
+//   store.audit, store.settings                     src/stores/admin.js
+// The Postgres store also exposes store.tx(fn) (fn(client) inside a transaction) for routes that need
+// several tables at once, and the memory store exposes its shared maps as store._mem.
 
 import pg from 'pg';
+import { ACCOUNT_SCHEMA, inTransaction, memoryAccountStores, pgAccountStores } from './stores/accounts.js';
+import { SLOT_SCHEMA, memorySlotStore, pgSlotStore } from './stores/slots.js';
+import { ADMIN_SCHEMA, memoryAdminStores, pgAdminStores } from './stores/admin.js';
 
 // Board definitions shared by both stores. value(row) reads the board's number from a memory row;
 // order is the tie-break chain after the value (asc unless noted); every board ends with
@@ -62,6 +73,11 @@ export function createMemoryStore() {
   const feedback = [];
   const records = new Map();
   let seq = 0;
+  // Shared by the account modules (src/stores/*.js). accountSaves: account id -> Map(slot -> row).
+  const mem = {
+    saves, records, accounts: new Map(), sessions: new Map(), signIns: new Map(), accountSaves: new Map(),
+    audit: [], settings: new Map(),
+  };
 
   return {
     kind: 'memory',
@@ -70,6 +86,10 @@ export function createMemoryStore() {
     _events: events,
     _feedback: feedback,
     _records: records,
+    _mem: mem,
+    ...memoryAccountStores(mem),
+    slots: memorySlotStore(mem),
+    ...memoryAdminStores(mem),
 
     async init() {},
     async ping() {},
@@ -216,6 +236,10 @@ const SCHEMA = [
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS records_name_key_idx ON records (name_key) WHERE name_key <> ''`,
   `CREATE INDEX IF NOT EXISTS records_crew_idx ON records (crew) WHERE crew <> ''`,
+  // Account tables (all new; the tables above are never altered). Order matters: foreign keys.
+  ...ACCOUNT_SCHEMA,
+  ...SLOT_SCHEMA,
+  ...ADMIN_SCHEMA,
 ];
 
 // SQL for each board: the value column, extra filter, and ordering (before the shared
@@ -282,6 +306,10 @@ export function createPgStore(databaseUrl) {
   return {
     kind: 'postgres',
     _pool: pool,
+    ...pgAccountStores(pool),
+    slots: pgSlotStore(pool),
+    ...pgAdminStores(pool),
+    tx: (fn) => inTransaction(pool, fn),
 
     async init() {
       const client = await pool.connect();
