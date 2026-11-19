@@ -195,7 +195,7 @@ and is not GET/HEAD, and the sign-in routes that make a session (`code`, `link`,
 | DELETE | `/v1/me` | `200 {ok:true}`, cookie cleared | `403 reauth`, `409 super` |
 
 `me` is `{id, email, name, role, tools, hasPassword, created}` (`created` in ms). The save-slot paths
-(`/v1/saves*`) and the admin API's routes answer `501 {error:"not_implemented"}` until they are built.
+(`/v1/saves*`) answer `501 {error:"not_implemented"}` until they are built.
 
 - `start` answers the same for every well-formed address (new, existing, disabled, or over its limit),
   so it never shows whether an address has an account. The link and the code expire after 15 minutes
@@ -229,11 +229,64 @@ codes, cookies or passwords.
 `accounts`, `sessions`, `sign_ins`, `account_saves`, `audit`, `settings`. An account's board record is a
 row in `records` with id `a:<account id>`.
 
-**Private admin API** (`/admin/v1/*`, for the studio admin on the internal network): on only when
-`ADMIN_API_KEY` is set (at least 32 characters). Requests that came through the public tunnel (with a
-`CF-Connecting-IP` or `CF-Ray` header) or from a browser (with an `Origin` header) get 404. Otherwise
-`X-Admin-Key` must match (`401 {error:"admin_key"}`) and `X-Admin-Email` must name the signed-in admin
-(`400 {error:"admin_email"}`).
+## Private admin API
+
+`/admin/v1/*` is for the studio admin site only, never for players or browsers. It works whether or
+not accounts are on (only the sign-in email needs them), and it is answered before CORS.
+
+**The guard**, checked in this order for every path under the prefix:
+
+1. `ADMIN_API_KEY` unset or shorter than 32 characters: `404 {error:"not_found"}` (the prefix does not exist).
+2. A `CF-Connecting-IP` or `CF-Ray` header (the request came through the public Cloudflare Tunnel) or an
+   `Origin` header (a browser): `404`, even with the right key.
+3. `X-Admin-Key` missing or not equal to `ADMIN_API_KEY` (constant-time compare): `401 {error:"admin_key"}`.
+4. `X-Admin-Email` missing or not an address: `400 {error:"admin_email"}`. It names the signed-in admin and
+   is recorded (lower-cased) in the audit log.
+
+Node's own `fetch` sends no `Origin` header, so the admin's server-side calls pass step 2.
+
+**How the admin reaches it.** The admin calls the service on the internal Coolify network, at the
+service's internal address (for example `http://<service container name>:3000`, set as the admin's
+`SERVICE_URL`), never through the public hostname: anything that comes through the tunnel is refused.
+Both sides share the same `ADMIN_API_KEY`, kept in Coolify.
+
+All answers are JSON with `Cache-Control: no-store`. Dates are epoch milliseconds. Pages are 1-based;
+`per` is 50 by default and at most 200. A malformed or unknown account id is `404 {error:"not_found"}`
+on every account path.
+
+| Method | Path | Success | Errors |
+| --- | --- | --- | --- |
+| GET | `/accounts?q=&role=&status=&page=&per=` | `{total, page, per, rows:[{id, email, name, role, status, created, lastSeen, saves, super}]}` | `400 bad_request` (unknown role/status, bad paging) |
+| GET | `/accounts/:id` | `{account:{id, email, name, role, tools, status, hasPassword, created, lastSeen, super}, saves:[{slot, name, test, at, objective, rec, updated, bytes}], sessions:[{created, lastUsed, note}], record}` | `404` |
+| POST | `/accounts/:id` `{role?, tools?, status?, name?}` | `{ok:true, account}` | `400 bad_request`, `400 name_invalid`, `409 name_taken`, `409 super`, `404` |
+| POST | `/accounts/:id/signout` | `{ok:true, ended}` | `404` |
+| POST | `/accounts/:id/signin-email` | `{ok:true}` | `404`, `409 disabled`, `502 mail_failed`, `503 accounts_off` |
+| DELETE | `/accounts/:id` | `{ok:true}` | `409 super`, `404` |
+| GET | `/accounts/:id/saves/:slot` | `{slot, name, test, at, objective, rec, body}` | `400 bad_slot`, `404 no_save`, `404` |
+| DELETE | `/accounts/:id/saves/:slot` | `{ok:true}` | `400 bad_slot`, `404 no_save`, `404` |
+| GET | `/audit?page=&per=` | `{total, page, per, rows:[{at, admin_email, action, account_id, email, detail}]}` | `400 bad_request` |
+| GET | `/settings` | `{testerTools}` | |
+| PUT | `/settings` `{testerTools}` | `{ok:true, testerTools}` | `400 bad_request` |
+
+- `q` matches part of the email or the keeper name, ignoring case (taken literally). The list is newest
+  first; `saves` is the number of used slots; `super` marks the addresses in `SUPER_ADMIN_EMAILS`.
+- `sessions` lists live sessions only, and never their token hashes. `record` is the account's board
+  record as `GET /v1/record` gives it, or `null`. `bytes` is the save's length in characters.
+- `POST /accounts/:id`: the admin sends one field at a time; several are accepted and all are checked
+  before anything is written. `role` is `player`, `tester` or `admin`; `tools` a list of the six tool
+  groups (stored without repeats, in the panel's order); `status` `active` or `disabled`; `name` the
+  keeper name with the same rules and storage as `PUT /v1/me` (the account's record row follows it;
+  `""` clears it). Disabling ends all the account's sessions at once.
+- A super admin cannot be changed or deleted here (`409 super`); signing them out, sending them a
+  sign-in email and their saves work as for anyone.
+- The sign-in email is the normal one (link and code, 15 minutes, once). Deleting removes the account,
+  its saves, its record, its sessions and any sign-ins waiting for its address (no email is sent).
+- `testerTools` is the set every tester gets (default `start, give, map, teleport`).
+- **Audit.** Every change, and every download of a whole save, writes one `audit` row: the admin's
+  email, an action (`role`, `tools`, `disable`, `enable`, `name`, `signout`, `signin-email`, `delete`,
+  `save-download`, `save-delete`, `settings`), the account id and a `detail` of what changed (`from`,
+  `to`, counts, the slot). Never a save body, token, code or password. In the list, `email` is the
+  account's current address, or `null` once it is deleted (a deletion's `detail` keeps the address).
 
 ## Run locally
 
@@ -286,7 +339,8 @@ filling with test rows:
 TEST_DATABASE_URL=postgres://user:pass@localhost:5432/lighthouse_test npm test
 ```
 
-The account tests use a fake clock and a fake mailer; one of the Postgres tests builds the schema of
+The account tests use a fake clock and a fake mailer; the admin API tests (`test/admin.test.js`, and
+`test/pg_admin.test.js` against Postgres) call a listening server with `fetch` the way the admin does; one of the Postgres tests builds the schema of
 the version before accounts in a schema of its own, fills it, and checks that starting the new code
 leaves every row and column as it was.
 
@@ -338,7 +392,7 @@ src/blocked-words.js  the words a board name may not contain (extend it here)
 src/store.js   createMemoryStore() and createPgStore(databaseUrl); mounts the account stores below
 src/stores/accounts.js  accounts, sessions, sign_ins (memory + Postgres)
 src/stores/slots.js     account_saves
-src/stores/admin.js     audit, settings
+src/stores/admin.js     audit, settings, the admin's account search
 src/accounts/config.js       the account settings from the environment
 src/accounts/limits.js       every account limit and constant
 src/accounts/context.js      sessions, cookies, request checks, the owner resolver, roles and tools, `me`
