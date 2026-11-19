@@ -377,7 +377,7 @@ function runStart0(id){
   if(isNorth(id)){ F.begin(northSave(id)); northEnter(id); return; }
   if(id==='cliffs-sandbar'||id==='cliffs-lip'){ // a good look at the headland's rock: from the dry bar below, or from the top
     const low=id==='cliffs-sandbar', s=loopSave({lantern:true});
-    s.pos=low?[138,-.95,56.9]:[209,42,16]; s.yaw=low?PI:PI/2; F.begin(s);
+    s.pos=low?[144,-.95,56.6]:[209,42,16]; s.yaw=low?PI:PI/2; F.begin(s);
     if(low)setTide('low');
     if(G.player.aimCamera)G.player.aimCamera(s.yaw,low?.1:.3);
     return; }

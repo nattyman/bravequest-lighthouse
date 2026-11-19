@@ -545,7 +545,11 @@ function buildTerrain(){
 function buildSea(stacks){
   const data=new Uint8Array(GNX*GNZ);
   for(let a=0;a<GNX*GNZ;a++)data[a]=Math.round(clamp((HG[a]+10)/20,0,1)*255);
-  for(const s of stacks){ // stamp sea stacks into the depth map so they get foam
+  // stamp sea stacks into the depth map so they get foam. The ones near the headland get their own broken foam ring from
+  // cliffdress.js (a strip round each stack's real waterline), so the shader's flat round disc is left off those.
+  const ringed=s=>!!G.cliffdress&&Math.hypot(s.x-166,s.z)<140-s.r;
+  for(const s of stacks){
+    if(ringed(s))continue;
     for(let j=Math.floor(s.z-s.r-3);j<=s.z+s.r+3;j++)for(let i=Math.floor(s.x-s.r-3);i<=s.x+s.r+3;i++){
       const gi=i-GX0,gj=j-GZ0; if(gi<0||gj<0||gi>=GNX||gj>=GNZ)continue;
       const d=Math.hypot(i-s.x,j-s.z)-s.r; if(d>3)continue; const hh=lerp(1,-1.6,clamp(d/3,0,1));
