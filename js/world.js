@@ -271,6 +271,7 @@ class Tiled{
   add(m,c){const x=m.elements[12],z=m.elements[14],key=Math.floor((x+250)/80)+','+Math.floor((z+130)/80);
     if(!this.t.has(key))this.t.set(key,[]); this.t.get(key).push([m.clone(),c?c.clone():null]);}
   build(parent){
+    if(this.o.collect)return []; // the instances are only gathered here (after the hollow filter); TREES draws them itself
     const out=[]; const bs=this.geo.boundingSphere;
     for(const [,items] of this.t){
       const g=new THREE.BufferGeometry();
@@ -288,6 +289,96 @@ class Tiled{
     return out;
   }
   get count(){let n=0;for(const [,v] of this.t)n+=v.length;return n;}
+}
+/* trees with distance LOD (Blender tree kit): trees near the focus go into per-form instanced pools (LOD0 close, LOD1
+   further out); every tree also sits in one merged LOD2 mesh per 80 m tile and part, which sways by a per-vertex root
+   attribute and drops (in the vertex shader) the trees the pools are drawing. The band centre only moves after the focus
+   has moved a few metres, so trees switch once and never flicker. saver: merged LOD2 only. */
+const TLOD={saver:[0,0],balanced:[16,46],high:[24,64]}, TLOD_STEP=3;
+const TL={u:{value:new THREE.Vector3(0,0,0)},update:null,stats:{}}, _m4=new THREE.Matrix4();
+G.system('treeLOD',{order:80,modes:'always',update(){ if(TL.update)TL.update(false); }});
+const _h1=(x,z)=>{const v=Math.sin(x*12.9898+z*78.233)*43758.5453; return v-Math.floor(v);};
+function mergedTreeMat(base,leaf,key){
+  const m=foliageShader(G.toon('#ffffff',{vertexColors:true}),{leaf});
+  if(leaf)G.nearFade(m,1.8,5.5); else G.nearFade(m,1.4,4.2);
+  const prev=m.onBeforeCompile;
+  m.onBeforeCompile=(sh,r)=>{ prev(sh,r); sh.uniforms.uLodC=TL.u;
+    const at='mvPosition=modelViewMatrix*mvPosition;\n  gl_Position=projectionMatrix*mvPosition;';
+    if(sh.vertexShader.indexOf(at)<0){ console.warn('[trees] merged wind: shader anchor missing'); return; }
+    sh.vertexShader='attribute vec3 bqRoot;\nuniform vec3 uLodC;\n'+sh.vertexShader.replace(at,`{ float k=clamp(bqRoot.z/9.,0.,1.35); k*=k; mvPosition.xz+=bqTreeWind(bqRoot.xy)*k; }
+  ${at}
+  if(distance(bqRoot.xy,uLodC.xy)<uLodC.z)gl_Position=vec4(0.,0.,-2.,1.);`); };
+  m.customProgramCacheKey=()=>'bqTreeM'+key+(m.defines&&m.defines.BQ_LQ?'q':'');
+  FOL.mats.push(m); return m;
+}
+function buildTreeLOD(T,TK,mats){
+  const forms=[...TK.oaks.map(f=>({f,kind:'oak'})),...TK.pines.map(f=>({f,kind:'pine'}))];
+  const snag=TK.extras&&TK.extras.snag?forms.push({f:TK.extras.snag,kind:'snag'})-1:-1;
+  const trees=[], tiles=new Map();
+  const gather=(trunks,crowns,f0,kind)=>trunks.forEach((tt,v)=>{
+    tt.o.collect=true; crowns[v].o.collect=true; tt.build(root); crowns[v].build(root);
+    for(const [key,items] of crowns[v].t)for(const [m,c] of items){ const x=m.elements[12], z=m.elements[14];
+      const fi=kind==='oak'&&snag>=0&&x<-62&&_h1(x,z)<.06?snag:f0+v, tr={x,z,m,c,fi,band:-1};
+      trees.push(tr); if(!tiles.has(key))tiles.set(key,[]); tiles.get(key).push(tr); } });
+  gather(T.oakT,T.oakC,0,'oak'); gather(T.pineT,T.pineC,TK.oaks.length,'pine');
+  // merged LOD2 per tile and part
+  const mT=mergedTreeMat(mats.trunk,false,'T'), mC=mergedTreeMat(mats.leaf,true,'L'), far=[], _n3=new THREE.Matrix3(), cc=new THREE.Color();
+  let farTris=0;
+  const depth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); // shadows: the merged trees leave out the pooled ones too
+  depth.onBeforeCompile=sh=>{ sh.uniforms.uLodC=TL.u; sh.vertexShader='attribute vec3 bqRoot;\nuniform vec3 uLodC;\n'+sh.vertexShader.replace('#include <project_vertex>',
+    '#include <project_vertex>\n  if(distance(bqRoot.xy,uLodC.xy)<uLodC.z)gl_Position=vec4(0.,0.,-2.,1.);'); };
+  depth.customProgramCacheKey=()=>'bqTreeD';
+  for(const [key,list] of tiles)for(const part of ['trunk','canopy']){
+    let nv=0, ni=0; for(const t of list){ const g=forms[t.fi].f[part]; if(!g)continue; nv+=g[2].attributes.position.count; ni+=g[2].index.count; }
+    if(!ni)continue;
+    const pos=new Float32Array(nv*3), nor=new Float32Array(nv*3), col=new Float32Array(nv*3), rt=new Float32Array(nv*3), idx=new Uint32Array(ni);
+    let o=0, oi=0;
+    for(const t of list){ const g=forms[t.fi].f[part]; if(!g)continue; const g2=g[2], P=g2.attributes.position.array, N=g2.attributes.normal.array, C=g2.attributes.color.array, I=g2.index.array;
+      const e=t.m.elements; _n3.getNormalMatrix(t.m); const ne=_n3.elements, tc=part==='canopy'&&t.c?t.c:null;
+      for(let i=0;i<P.length;i+=3){ const x=P[i],y=P[i+1],z=P[i+2], k=o*3+i;
+        pos[k]=e[0]*x+e[4]*y+e[8]*z+e[12]; pos[k+1]=e[1]*x+e[5]*y+e[9]*z+e[13]; pos[k+2]=e[2]*x+e[6]*y+e[10]*z+e[14];
+        const a=N[i],b=N[i+1],c=N[i+2]; let nx=ne[0]*a+ne[3]*b+ne[6]*c, ny=ne[1]*a+ne[4]*b+ne[7]*c, nz=ne[2]*a+ne[5]*b+ne[8]*c; const l=Math.hypot(nx,ny,nz)||1;
+        nor[k]=nx/l; nor[k+1]=ny/l; nor[k+2]=nz/l;
+        col[k]=C[i]*(tc?tc.r:1); col[k+1]=C[i+1]*(tc?tc.g:1); col[k+2]=C[i+2]*(tc?tc.b:1);
+        rt[k]=t.x; rt[k+1]=t.z; rt[k+2]=y; }
+      for(let i=0;i<I.length;i++)idx[oi+i]=I[i]+o; o+=P.length/3; oi+=I.length; }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.BufferAttribute(nor,3));
+    g.setAttribute('color',new THREE.BufferAttribute(col,3)); g.setAttribute('bqRoot',new THREE.BufferAttribute(rt,3));
+    g.setIndex(new THREE.BufferAttribute(nv>65535?idx:new Uint16Array(idx),1)); g.computeBoundingSphere();
+    const me=new THREE.Mesh(g,part==='trunk'?mT:mC); me.customDepthMaterial=depth; me.castShadow=true; me.receiveShadow=true; me.userData.bqTreeMesh=true; me.name='trees'+(part==='trunk'?'T':'C');
+    root.add(me); far.push(me); farTris+=ni/3; }
+  // per-form pools for LOD0 and LOD1
+  const pools=[];
+  forms.forEach((F,fi)=>{ const n=trees.filter(t=>t.fi===fi).length; if(!n)return;
+    for(const lod of [0,1])for(const part of ['trunk','canopy']){ const g0=F.f[part]&&F.f[part][lod]; if(!g0)continue;
+      const g=new THREE.BufferGeometry(); for(const k in g0.attributes)g.setAttribute(k,g0.attributes[k]); g.setIndex(g0.index);
+      const im=new THREE.InstancedMesh(g,part==='trunk'?mats.trunk:mats.leaf,n);
+      if(part==='canopy')im.setColorAt(0,_c.setRGB(1,1,1)); // (sizes the colour buffer: before count drops to 0)
+      im.count=0; im.visible=false;
+      im.castShadow=true; im.receiveShadow=true; im.frustumCulled=true; im.userData.bqTreeMesh=true; im.name='treePool';
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); root.add(im); pools.push({im,fi,lod,part,bs:g0.boundingSphere}); } });
+  const ref={x:1e9,z:1e9,level:''}, box=new THREE.Box3();
+  TL.update=(force)=>{
+    const f=G.focus, lv=G.quality.level, R=TLOD[lv]||TLOD.balanced;
+    if(!force&&ref.level===lv&&Math.hypot(f.x-ref.x,f.z-ref.z)<TLOD_STEP)return;
+    ref.x=f.x; ref.z=f.z; ref.level=lv; TL.u.value.set(f.x,f.z,R[1]);
+    for(const p of pools)p.n=0;
+    const byKey=new Map(); for(const p of pools)byKey.set(p.fi*4+p.lod*2+(p.part==='trunk'?0:1),p);
+    let n0=0,n1=0;
+    for(const t of trees){ const d=Math.hypot(t.x-f.x,t.z-f.z); t.band=d<R[0]?0:d<R[1]?1:2; if(t.band===2)continue;
+      if(t.band===0)n0++; else n1++;
+      for(const part of [0,1]){ const p=byKey.get(t.fi*4+t.band*2+part); if(!p)continue;
+        p.im.setMatrixAt(p.n,t.m); if(part&&t.c)p.im.setColorAt(p.n,t.c); p.n++; } }
+    for(const p of pools){ const im=p.im; im.count=p.n; im.visible=p.n>0; if(!p.n)continue;
+      im.instanceMatrix.needsUpdate=true; if(im.instanceColor)im.instanceColor.needsUpdate=true;
+      box.makeEmpty(); for(let i=0;i<p.n;i++){ im.getMatrixAt(i,_m4); _v.copy(p.bs.center).applyMatrix4(_m4); box.expandByPoint(_v); }
+      const sph=im.geometry.boundingSphere||new THREE.Sphere(); box.getBoundingSphere(sph); sph.radius+=p.bs.radius*1.5; im.geometry.boundingSphere=sph; }
+    TL.stats.near=n0; TL.stats.mid=n1; TL.stats.far=trees.length-n0-n1; TL.stats.level=lv; };
+  TL.stats={trees:trees.length,forms:forms.length,tiles:tiles.size,farMeshes:far.length,farTris,pools:pools.length};
+  TL.update(true);
+  G.on('quality',()=>TL.update(true));
+  W.treeLOD={update:f=>TL.update(f),stats:TL.stats,trees,pools,far};
 }
 /* VIGIL (2/2) — the hollow's furniture (temple.js, Place agent; TEMPLE.md): a ring of leaning standing stones on the rim, a
    stone stair down its east bank, the door in a carved portal against the west bank (temple.js grows the ink roots in the
@@ -427,7 +518,7 @@ function groundColor(x,z,h,slope,pd,out){
   out.lerp(C.ochre,smooth(.62,.76,vnoise(x*.07+20,z*.07-3))*.4);
   if(x>110&&h>30)out.lerp(C.headGrass,smooth(30,41.5,h)*.75);
   const ff=smooth(-58,-82,x);
-  if(ff>0){_t1.copy(C.moss).lerp(C.litter,smooth(.38,.72,n2)).lerp(C.mossDark,smooth(.48,.78,n1)*.7);
+  if(ff>0){_t1.copy(C.moss).lerp(C.litter,smooth(.38,.72,n2)).lerp(C.mossDark,smooth(.48,.78,n1)*.55);
     const dc=Math.hypot(x+165,z-5); if(dc<20)_t1.lerp(C.clearing,(1-smooth(8,20,dc))*.7);
     out.lerp(_t1,ff);}
   // shore
@@ -443,6 +534,8 @@ function groundColor(x,z,h,slope,pd,out){
   // trail
   const p=1-smooth(1.1,2.4,pd);
   if(p>0){_t1.copy(h>41.5&&x>120?C.cobble:C.dirt).lerp(C.dirt2,smooth(.3,.7,n2)*.5); out.lerp(_t1,p*.9*(1-rk*.6));}
+  { const tu=vnoise(x*.33+7,z*.33-5), gy=(1-rk)*(1-p)*smooth(1.8,3.2,h)*(1-ff*.5); // tussocks: lighter crowns, darker hollows
+    out.multiplyScalar(1+(tu-.5)*.2*gy); out.lerp(C.dryGrass,smooth(.6,.9,tu)*.12*gy*(1-ff)); }
   out.multiplyScalar(.9+.2*n3);
   return out;
 }
@@ -483,7 +576,7 @@ function bakeTreeAO(){
   for(let t=0;t<T.length;t+=3){const x=T[t],z=T[t+1],R=T[t+2];
     for(let j=Math.floor(z-R-GZ0);j<=Math.ceil(z+R-GZ0);j++)for(let i=Math.floor(x-R-GX0);i<=Math.ceil(x+R-GX0);i++){
       if(i<0||j<0||i>=GNX||j>=GNZ)continue; const d=Math.hypot(GX0+i-x,GZ0+j-z)/R; if(d>=1)continue;
-      const f=1-.45*Math.pow(1-d,1.6), c=j*GNX+i, o=AO.get(c); AO.set(c,o===undefined?f:Math.min(o,f)*(.5+.5*Math.max(o,f)/1));}}
+      const f=1-.34*Math.pow(1-d,1.6), c=j*GNX+i, o=AO.get(c); AO.set(c,o===undefined?f:Math.min(o,f)*(.5+.5*Math.max(o,f)/1));}}
   const touched=AO;
   for(const [c,f] of AO){const a=c*3; HC[a]*=f;HC[a+1]*=f;HC[a+2]*=f;}
   for(const ch of TCH){const cl=ch.g.attributes.color.array; let any=false;
@@ -807,10 +900,12 @@ function buildForest(){
   // nearFade replaces the cache key: give each foliage program its own again (and the quality variant)
   for(const [m,k] of [[leafMat,'L'],[treeTrunkMat,'T']])m.customProgramCacheKey=()=>'bqFolNF'+k+(m.defines&&m.defines.BQ_LQ?'q':'');
   FOL.mats.push(leafMat,treeTrunkMat);
-  const oaks=[oakGeos(11),oakGeos(29),oakGeos(53)], pines=[pineGeos(7),pineGeos(19)];
+  const TK=G.treekit&&G.treekit.oaks&&G.treekit.oaks.length&&G.treekit.pines.length?G.treekit:null; // Blender kit (else the old generators)
+  const oaks=TK?TK.oaks.map(f=>({trunk:f.trunk[0],canopy:f.canopy[0],h:f.h})):[oakGeos(11),oakGeos(29),oakGeos(53)];
+  const pines=TK?TK.pines.map(f=>({trunk:f.trunk[0],canopy:f.canopy[0],h:f.h})):[pineGeos(7),pineGeos(19)];
   const T={oakT:oaks.map(o=>new Tiled(o.trunk,treeTrunkMat,{cast:true})),oakC:oaks.map(o=>new Tiled(o.canopy,leafMat,{cast:true})),
     pineT:pines.map(o=>new Tiled(o.trunk,treeTrunkMat,{cast:true})),pineC:pines.map(o=>new Tiled(o.canopy,leafMat,{cast:true}))};
-  W._treeTiles=T;
+  W._treeTiles=T; T.kit=TK; T.mats={trunk:treeTrunkMat,leaf:leafMat};
   const addTree=(kind,x,z,s,lean,leanDir,tint)=>{
     const y=gh(x,z);
     const m=new THREE.Matrix4().compose(_p.set(x,y,z),_q.setFromEuler(_e.set(Math.cos(leanDir)*lean,r()*TAU,Math.sin(leanDir)*lean,'YXZ')),_s.set(s,s*(.9+r()*.25),s));
@@ -857,7 +952,9 @@ function buildForest(){
     if(x>112&&h<41.9)continue; if(Math.hypot(x-180,z)<20||Math.hypot(x-165,z)<20)continue; if(!clearOf(x,z,1))continue;
     const s=.45+r()*.5; _c.setHSL(.18+r()*.1,.3,.42+r()*.1); bushes.add(mat4(x,h+.2*s,z,0,r()*TAU,0,s*1.2,s*.9,s*1.2),_c.clone().multiplyScalar(1.5));}
   W.stats.ferns=ferns.count; W.stats.bushes=bushes.count;
-  ferns.build(root); bushes.build(root);
+  // undergrowth.js, when loaded, draws the ferns and bushes itself from these same placements
+  const UG=G.undergrowth&&G.undergrowth.build;
+  if(UG)UG({ferns,bushes,root,leafMat,fernMat,Tiled}); else{ ferns.build(root); bushes.build(root); }
   // fallen logs (merged) + mossy rocks
   const logParts=[], bark=col('#3d3027'), moss=col('#41562f');
   for(let i=0,k=0;i<400&&k<34;i++){const x=-228+r()*170,z=-100+r()*200; if(x>-74)continue;
@@ -868,7 +965,12 @@ function buildForest(){
     G.addBoxCollider({x,z,hw:L/2,hd:rad+.05,yaw,y0:y-2,y1:y+rad}); k++;}
   if(logParts.length){const lm=new THREE.Mesh(mergeParts(logParts),trunkMat); lm.castShadow=lm.receiveShadow=true; root.add(lm);}
 }
-function buildTreeTiles(){const T=W._treeTiles; for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.build(root);}
+/* shared with the plant modules: the wind/rim shader patch, the list of foliage materials that follow the quality
+   setting, and the wind uniforms */
+W.fol={shader:foliageShader,rim:rimShader,mats:FOL.mats,spherize,SH,wind:WIND_GLSL};
+function buildTreeTiles(){const T=W._treeTiles;
+  if(T.kit){ try{ buildTreeLOD(T,T.kit,T.mats); return; }catch(e){ console.error('tree kit',e); for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.o.collect=false; } }
+  for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.build(root);}
 
 /* ---------- rocks everywhere ---------- */
 function buildRocks(){
@@ -953,27 +1055,48 @@ void main(){vec3 p=position;float t=uTime*(.15+seed*.2)+seed*20.;p.y=mod(p.y+t*1
 /* =====================================================================
    MOOR: flowers, walls, hamlet, standing stones, lone trees
    ===================================================================== */
+const ghash=(x,z,s)=>{const v=Math.sin(x*127.1+z*311.7+s*74.7)*43758.5453; return v-Math.floor(v);}; // position hash 0..1
+/* where wild flowers gather: one slow field, shared with the grass (shorter turf where they bloom) */
+const flowerDrift=(x,z)=>smooth(.32,.74,vnoise(x*.045+31,z*.045-17));
 function buildFlowers(){
   const r=rnd(5150);
-  const parts=[]; const stem=new THREE.PlaneGeometry(.025,.32); stem.translate(0,.16,0);
-  parts.push({g:stem,c:col('#3c5a2c')},{g:stem,m:mat4(0,0,0,0,PI/2,0),c:col('#3c5a2c')});
-  const head=new THREE.CircleGeometry(.075,5); head.rotateX(-PI/2); head.translate(0,.33,0);
-  parts.push({g:head,c:col('#ffffff')});
-  const center=new THREE.CircleGeometry(.025,4); center.rotateX(-PI/2); center.translate(0,.335,0);
-  parts.push({g:center,c:col('#e8c860')});
-  const geo=mergeParts(parts); const N=geo.attributes.normal; for(let i=0;i<N.count;i++)N.setXYZ(i,0,1,0);
-  const fl=new Tiled(geo,G.toon('#ffffff',{vertexColors:true,side:THREE.DoubleSide}),{});
-  const vio=col('#9a6fe0'),vio2=col('#7b54c4'),wht=col('#ece6f4');
+  // a stem (two crossed blades), a pair of low leaves and a head of five cupped petals round a small eye; normals point up
+  const P=[],Cc=[], stemC=col('#4a6638'), leafC=col('#557a3c'), eye=col('#e8c860');
+  const PM=[]; let pm=0; const tri=(a,b,c,ca,cb,cc)=>{P.push(...a,...b,...c); PM.push(pm,pm,pm); for(const q of [ca,cb||ca,cc||ca])Cc.push(q.r,q.g,q.b);};
+  for(const yaw of [0,PI/2]){const cx=Math.cos(yaw)*.012,cz=Math.sin(yaw)*.012;
+    tri([-cx,0,-cz],[cx,0,cz],[cx,.32,cz],stemC); tri([-cx,0,-cz],[cx,.32,cz],[-cx,.32,-cz],stemC);}
+  for(const a of [.5,3.4]){const ca=Math.cos(a),sa=Math.sin(a);
+    tri([0,.02,0],[ca*.1-sa*.03,.09,sa*.1+ca*.03],[ca*.1+sa*.03,.06,sa*.1-ca*.03],leafC);}
+  pm=1; const pIn=new THREE.Color(.86,.84,.88), pOut=new THREE.Color(1.1,1.08,1.1);
+  for(let i=0;i<5;i++){const t=i/5*TAU, a0=t-.52, a1=t+.52;
+    tri([Math.cos(t)*.012,.322,Math.sin(t)*.012],[Math.cos(a0)*.095,.345,Math.sin(a0)*.095],[Math.cos(a1)*.095,.345,Math.sin(a1)*.095],pIn,pOut,pOut);}
+  pm=.25; tri([.024,.336,0],[-.012,.336,.021],[-.012,.336,-.021],eye);
+  const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.Float32BufferAttribute(P,3));
+  geo.setAttribute('normal',new THREE.Float32BufferAttribute(P.map((_,i)=>i%3===1?1:0),3)); geo.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3)); geo.setAttribute('pm',new THREE.Float32BufferAttribute(PM,1));
+  const fm=G.toon('#ffffff',{vertexColors:true,side:THREE.DoubleSide}); fm.name='flowers';
+  fm.onBeforeCompile=sh=>{ sh.vertexShader='attribute float pm;\n'+sh.vertexShader.replace('#include <color_vertex>',`vColor=color;
+  #ifdef USE_INSTANCING_COLOR
+  vColor*=mix(vec3(1.),instanceColor,pm);
+  #endif`); };
+  fm.customProgramCacheKey=()=>'bqFlower';
+  const fl=new Tiled(geo,fm,{});
+  const vio=col('#9a6fe0'),vio2=col('#7b54c4'),wht=col('#ece6f4'), prim=col('#e6d690'), mauve=col('#ad7ac4'), _k=new THREE.Vector3();
+  // flowers in a drift stand taller and share a colour; strays between drifts stay small (scale/colour only: same draws as ever)
+  const look=(M,c,x,z)=>{const d=flowerDrift(x,z), hv=vnoise(x*.03-9,z*.03+4), k=lerp(.8,1.3,d)*(.92+ghash(x,z,7)*.16);
+    M.scale(_k.set(k,k,k)); let o=c;
+    if(c===wht){ if(hv>.6)o=prim; } else if(hv>.66&&d>.4)o=mauve; else if(d>.5)o=hv<.4?vio2:vio;
+    return o;};
   let n=0;
   for(let i=0;i<1800;i++){ // clumps
     const cx=-70+r()*285,cz=-100+r()*200; const h=gh(cx,cz); if(h<2||gslope(cx,cz)>.6)continue;
     if(cx>112&&h<41.9)continue; if(Math.hypot(cx-180,cz)<10.5)continue;
     const white=r()<.4, k=4+Math.floor(r()*10);
     for(let j=0;j<k;j++){const x=cx+(r()-.5)*3.2,z=cz+(r()-.5)*3.2,y=gh(x,z); if(pathDist(x,z)<1.6||inFoot(x,z,.3))continue;
-      const s=.8+r()*.7; fl.add(mat4(x,y-.02,z,(r()-.5)*.3,r()*TAU,(r()-.5)*.3,s,s*(.8+r()*.5),s),white?wht:(r()<.5?vio:vio2)); n++;}
+      const s=.8+r()*.7, M=mat4(x,y-.02,z,(r()-.5)*.3,r()*TAU,(r()-.5)*.3,s,s*(.8+r()*.5),s), c=white?wht:(r()<.5?vio:vio2);
+      fl.add(M,look(M,c,x,z)); n++;}
   }
   // forest-edge violets and cottage beds
-  for(let i=0;i<600;i++){const x=-130+r()*80,z=-90+r()*180,h=gh(x,z); if(h<2.6||pathDist(x,z)<1.4||!clearOf(x,z,.2))continue; fl.add(mat4(x,h-.02,z,0,r()*TAU,0,.9),vio); n++;}
+  for(let i=0;i<600;i++){const x=-130+r()*80,z=-90+r()*180,h=gh(x,z); if(h<2.6||pathDist(x,z)<1.4||!clearOf(x,z,.2))continue; const M=mat4(x,h-.02,z,0,r()*TAU,0,.9); fl.add(M,look(M,vio,x,z)); n++;}
   W.stats.flowers=n;
   fl.build(root);
 }
@@ -1625,7 +1748,10 @@ function buildHeadland(){
   // garden flower beds + bushes inside the fence
   const fg=root; const bedMat=G.toon('#ffffff',{vertexColors:true});
   const bed=[]; for(let k=0;k<26;k++){const x=150+r()*16,z=16.5+r()*3.5; if(Math.abs(x-158)<1.6)continue; bed.push({g:blob(.35+r()*.25,0,k,.3),m:mat4(x,TOP+.1,z,0,0,0,1,.7,1),c:col(r()<.5?'#7a55b8':'#d9d0e6')});}
-  for(let k=0;k<10;k++){const bx=C0.x-Wd/2-.6+r()*(Wd+1.2),gc=r()<.6?'#4a6a3a':'#8a62c8'; if(Math.abs(bx-(C0.x+COT.doorX))<1.4)continue; bed.push({g:blob(.5,0,k+50,.3),m:mat4(bx,TOP+.25,C0.z-Dp/2-.55,0,0,0,1,.8,.8),c:col(gc)});}
+  const UGA=G.undergrowth&&G.undergrowth.add, gb=[]; // the undergrowth kit draws the bushes by the cottage wall when it is there
+  for(let k=0;k<10;k++){const bx=C0.x-Wd/2-.6+r()*(Wd+1.2),gc=r()<.6?'#4a6a3a':'#8a62c8'; if(Math.abs(bx-(C0.x+COT.doorX))<1.4)continue;
+    if(UGA)gb.push({x:bx,y:TOP,z:C0.z-Dp/2-.55,kind:gc==='#4a6a3a'?'shrub':'heather',k}); else bed.push({g:blob(.5,0,k+50,.3),m:mat4(bx,TOP+.25,C0.z-Dp/2-.55,0,0,0,1,.8,.8),c:col(gc)});}
+  if(UGA&&gb.length&&!UGA(gb,root))for(const o of gb)bed.push({g:blob(.5,0,o.k+50,.3),m:mat4(o.x,TOP+.25,o.z,0,0,0,1,.8,.8),c:col(o.kind==='shrub'?'#4a6a3a':'#8a62c8')});
   const bedMesh=new THREE.Mesh(mergeParts(bed),bedMat); bedMesh.castShadow=true; bedMesh.receiveShadow=true; fg.add(bedMesh);
   mats.plaster=mats.plaster||G.toon('#ffffff',{vertexColors:true}); mats.plaster.color.copy(col('#e3d8c2'));
   mats.metal=G.toon('#2a2526',{vertexColors:true});
@@ -1825,36 +1951,90 @@ function buildMushrooms(){
 }
 
 /* ---------- grass that follows the focus ---------- */
-const GR={C:8,N:11,K:190,R:40,slots:[],fx:1e9,fz:1e9,queue:[],geo:null,mat:null,level:null};
-/* per quality: tufts per 8 m cell (ring radius stays 40 m), parting, wind detail */
-const GRQ={saver:{K:100,push:false,lq:true},balanced:{K:200,push:true,lq:false},high:{K:280,push:true,lq:false}}; // tufts are 4 blades (were 3)
-function buildGrassGeo(){
-  // tuft of 4 bent blades of mixed height and lean. Vertex colour is a shade factor (roots -> bright tips); the instance
-  // colour is the ground's. Roots start just under the surface and only a little darker than the ground, so a tuft grows
-  // out of the turf instead of reading as a model pushed into it (playtest 2026-11-07).
-  const pos=[],colA=[],idx=[]; const base=new THREE.Color(.7,.74,.66),mid=new THREE.Color(.9,.94,.84),tip=new THREE.Color(1.22,1.24,.98);
-  const B=[[.4,.06,.5,.2],[2.1,.13,.62,.27],[3.9,.1,.44,.16],[5.3,.15,.57,.3]]; // angle, offset from centre, height, lean
-  for(const [a,off,h,lean] of B){const ca=Math.cos(a),sa=Math.sin(a),w=.042;
-    const o=pos.length/3,ox=ca*off,oz=sa*off,px=-sa*w,pz=ca*w;
-    pos.push(ox-px,-.06,oz-pz, ox+px,-.06,oz+pz, ox-px*.6+ca*lean*.5,h*.5,oz-pz*.6+sa*lean*.5, ox+px*.6+ca*lean*.5,h*.5,oz+pz*.6+sa*lean*.5, ox+ca*lean,h,oz+sa*lean);
-    for(const c of [base,base,mid,mid,tip])colA.push(c.r,c.g,c.b);
-    idx.push(o,o+1,o+2,o+1,o+3,o+2,o+2,o+3,o+4);}
+const GR={C:8,N:11,K:190,R:28,sc:1,slots:[],fx:1e9,fz:1e9,queue:[],geo:null,mat:null,level:null,kind:''};
+/* the near ring only keeps the 8 m cells that can hold a tuft within GR.R of the focus (a disc, not the whole square),
+   so every tuft it pays for can be seen and the same count grows denser */
+GR.off=(()=>{ const o=[], n=Math.ceil(GR.R/GR.C)+1; for(let i=-n;i<=n;i++)for(let j=-n;j<=n;j++){ const a=Math.max(0,Math.abs(i)-1), b=Math.max(0,Math.abs(j)-1); if(GR.C*Math.hypot(a,b)<GR.R)o.push([i,j]); } return o; })();
+/* the outer meadow: broad, taller tufts in the 8 m cells of a ring from ~20 m to 48 m, so the open ground reads as one sward
+   where the dense ring thins out */
+const GRF={C:8,N:11,K:0,R:48,slots:[],fx:1e9,fz:1e9,queue:[],geo:null,mat:null,mesh:null};
+GRF.off=(()=>{ const o=[], n=Math.ceil(GRF.R/GRF.C)+1; for(let i=-n;i<=n;i++)for(let j=-n;j<=n;j++){ const a=Math.max(0,Math.abs(i)-1), b=Math.max(0,Math.abs(j)-1);
+  if(GRF.C*Math.hypot(a,b)<GRF.R&&GRF.C*Math.hypot(Math.abs(i)+1,Math.abs(j)+1)>GR.R-8)o.push([i,j]); } return o; })();
+/* per quality: near tufts per 8 m cell (disc of 28 m) and their kind ('s' three curved blades and three short ones, 'f' four curved
+   blades, one of which may be a seed stalk, and three short ones), outer tufts per 8 m cell, their size (sc: saver grows fewer,
+   larger tufts), parting, wind detail */
+const GRQ={saver:{K:120,geo:'s',KF:72,sc:1.2,push:false,lq:true},balanced:{K:252,geo:'f',KF:70,sc:1,push:true,lq:false},high:{K:360,geo:'f',KF:145,sc:1,push:true,lq:false}};
+function buildGrassGeo(kind){
+  /* one tuft of slim curved blades of mixed height and lean. Vertex colour is a shade factor (roots a little darker than the
+     ground -> slightly lighter tips); the instance colour is the ground's, so a tuft grows out of the turf. Normals face out
+     from the tuft along each blade (both faces share them), so blades turned to the sun catch it and the rest stay in shade.
+     'f' also carries gS: the first blade as a fine seed stalk with a small head (gS.w marks the head), blended to per tuft. */
+  const full=kind!=='s', pos=[],nor=[],colA=[],gS=[],idx=[];
+  const base=[.62,.66,.6],mid=[.9,.94,.84],tip=[1.14,1.18,.98];
+  const B=[[.4,.04,.62,.14,.034],[1.95,.1,.5,.25,.036],[3.5,.07,.42,.3,.036],[5.0,.09,.56,.19,.032]]; // angle, offset, height, lean, half width
+  if(!full)B.splice(1,1);
+  B.forEach(([a,off,h,lean,w],bi)=>{const ca=Math.cos(a),sa=Math.sin(a),o=pos.length/3,ox=ca*off,oz=sa*off,px=-sa,pz=ca;
+    // curved blade tapering to a fine point: the middle sits a little behind the straight line from root to tip
+    const P=[[ox-px*w,-.06,oz-pz*w],[ox+px*w,-.06,oz+pz*w],[ox-px*w*.5+ca*lean*.3,h*.55,oz-pz*w*.5+sa*lean*.3],
+             [ox+px*w*.5+ca*lean*.3,h*.55,oz+pz*w*.5+sa*lean*.3],[ox+ca*lean,h,oz+sa*lean]], side=[-1,1,-1,1,0];
+    P.forEach((p,i)=>{pos.push(...p); const sd=side[i];
+      _n.set(ca*.75+px*sd*.3,.75,sa*.75+pz*sd*.3).normalize(); nor.push(_n.x,_n.y,_n.z);
+      const c=i<2?base:i<4?mid:tip; colA.push(c[0],c[1],c[2]);});
+    if(full){
+      if(bi===0){const sh=.64; // seed stalk: a hair-fine stem, a small head at the top
+        gS.push(ox-px*.005,-.06,oz-pz*.005,0, ox+px*.005,-.06,oz+pz*.005,0,
+                ox-px*.016+ca*.04,sh*.86,oz-pz*.016+sa*.04,1, ox+px*.016+ca*.04,sh*.86,oz+pz*.016+sa*.04,1, ox+ca*.05,sh,oz+sa*.05,1);}
+      else for(const p of P)gS.push(p[0],p[1],p[2],0);}
+    idx.push(o,o+1,o+2,o+1,o+3,o+2,o+2,o+3,o+4);});
+  // short single-triangle blades between them: the low turf the eye reads as cover
+  for(const [a,h,lean] of [[1.1,.26,.14],[2.75,.2,.18],[4.5,.3,.12]]){const ca=Math.cos(a),sa=Math.sin(a),px=-sa,pz=ca,ox=ca*.13,oz=sa*.13,w=.03,o=pos.length/3;
+    pos.push(ox-px*w,-.05,oz-pz*w, ox+px*w,-.05,oz+pz*w, ox+ca*lean,h,oz+sa*lean);
+    for(let i=0;i<3;i++){_n.set(ca*.75+(i<2?(i?px:-px)*.3:0),.75,sa*.75+(i<2?(i?pz:-pz)*.3:0)).normalize(); nor.push(_n.x,_n.y,_n.z);}
+    colA.push(...base,...base,...mid); if(full)gS.push(...pos.slice(o*3,o*3+3),0,...pos.slice(o*3+3,o*3+6),0,...pos.slice(o*3+6,o*3+9),0);
+    idx.push(o,o+1,o+2);}
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
-  g.setAttribute('normal',new THREE.Float32BufferAttribute(new Array(pos.length).fill(0).map((_,i)=>i%3===1?1:0),3));
-  g.setAttribute('color',new THREE.Float32BufferAttribute(colA,3)); g.setIndex(idx);
+  g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(colA,3));
+  if(full)g.setAttribute('gS',new THREE.Float32BufferAttribute(gS,4));
+  g.setIndex(idx);
   return g;
 }
+function buildFarGeo(){ // four broad single-triangle blades fanned out: a clump of sward seen from 20-48 m
+  const pos=[],nor=[],colA=[];
+  for(const [a,h,lean,off] of [[.3,.56,.16,.06],[1.9,.48,.2,.1],[3.4,.6,.14,.05],[4.9,.44,.22,.11]]){const ca=Math.cos(a),sa=Math.sin(a),w=.085,ox=ca*off,oz=sa*off;
+    pos.push(ox-sa*w,-.05,oz+ca*w, ox+sa*w,-.05,oz-ca*w, ox+ca*lean,h,oz+sa*lean);
+    for(let i=0;i<3;i++){_n.set(ca*.15,1,sa*.15).normalize(); nor.push(_n.x,_n.y,_n.z);}
+    colA.push(1.18,1.28,1.08, 1.18,1.28,1.08, 1.55,1.78,1.15);} // brighter than the near blades: they get none of the near ring's sun-through light
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(colA,3));
+  return g;
+}
+const GRASS_FRAG=sh=>{ // blades are lit from the side their normal faces, whichever face is towards the camera
+  sh.fragmentShader=sh.fragmentShader.replace('normal = normal * faceDirection;','');};
 function grassMaterial(){
   const mat=G.toon('#ffffff',{vertexColors:true,side:THREE.DoubleSide});
   mat.onBeforeCompile=sh=>{Object.assign(sh.uniforms,{uTime:SH.time,uFocus:SH.focus,uWind:SH.wind,uPush:SH.push,uSunW:SH.sunW,uSunCol:SH.sunCol});
     sh.vertexShader=WIND_GLSL+`
 uniform vec3 uFocus;uniform vec3 uSunW;uniform vec4 uPush[${PUSHN}];
-varying vec4 vGr; // x tip height 0..1, y gust brightening, z sun-through, w far (blend to ground)
+attribute vec4 iGr; // per tuft: x unused, y seed stalk, z dry/tawny ground, w thinning hash
+#ifndef BQ_GS
+attribute vec4 gS;
+#endif
+varying vec4 vGr; // x tip height 0..1, y gust sheen, z sun-through, w far (blend to ground)
 `+sh.vertexShader
+      .replace('#include <beginnormal_vertex>',`#include <beginnormal_vertex>
+  { vec2 q=vec2(instanceMatrix[3][0],instanceMatrix[3][2]); // further off a blade's side shading only flickers: light the tuft like the turf
+    objectNormal=normalize(mix(objectNormal,vec3(0.,1.,0.),.7*smoothstep(8.,22.,length(q-uFocus.xz)))); }`)
       .replace('#include <begin_vertex>',`#include <begin_vertex>
+  #ifndef BQ_GS
+  transformed+=(gS.xyz-position)*iGr.y;
+  #endif
   vec2 ip0=vec2(instanceMatrix[3][0],instanceMatrix[3][2]);
-  float fd=length(ip0-uFocus.xz); transformed*=1.-smoothstep(${(GR.R-12).toFixed(1)},${GR.R.toFixed(1)},fd);
+  float fd=length(ip0-uFocus.xz); // each tuft leaves at its own distance: the ring's edge thins out instead of ending in a line
+  transformed*=1.-smoothstep(${(GR.R-9).toFixed(1)}+iGr.w*5.,${(GR.R-3).toFixed(1)}+iGr.w*3.,fd);
+  transformed.xz*=1.+.3*smoothstep(10.,24.,fd); transformed.y*=1.+.1*smoothstep(10.,24.,fd); // fewer blades to the eye out there: broader tufts
   vec3 cw0=(modelMatrix*vec4(instanceMatrix[3][0],instanceMatrix[3][1],instanceMatrix[3][2],1.)).xyz; // tufts the camera sits in (low aim, slopes) shrink away
   transformed*=smoothstep(.5,1.7,length(cw0-cameraPosition));`)
       .replace('#include <project_vertex>',`vec4 mvPosition=vec4(transformed,1.);
@@ -1866,8 +2046,8 @@ varying vec4 vGr; // x tip height 0..1, y gust brightening, z sun-through, w far
   float w=sin(uTime*1.7+ip.x*.23+ip.y*.17)*.5+.35;
   vec2 bend=uWind.xy*w*k*.38;
   #else
-  float gust=bqGust(ip);
-  float w=sin(uTime*1.7+ip.x*.23+ip.y*.17)*.38+sin(uTime*2.9+ip.x*.61-ip.y*.43)*.16+.22+gust*1.15;
+  float gust=bqGust(ip), nf=1.-smoothstep(12.,26.,fd); // the quick flutter only close by: nothing to shimmer at range
+  float w=sin(uTime*1.7+ip.x*.23+ip.y*.17)*.36+sin(uTime*2.9+ip.x*.61-ip.y*.43)*.16*nf+.22+gust*1.35;
   vec2 bend=uWind.xy*w*k*.42;
   #endif
   float press=0.;
@@ -1876,46 +2056,70 @@ varying vec4 vGr; // x tip height 0..1, y gust brightening, z sun-through, w far
     float f=(1.-smoothstep(P.z*.3,P.z,L))*P.w; bend+=d/max(L,.05)*f*k*2.2; press=max(press,f); }
   #endif
   mvPosition.xz+=bend; mvPosition.y-=dot(bend,bend)*.9+press*k*.25;
-  // look: world colour patches, ground-matched far ring, gusts brighten, sun shining through the blades
-  float fr=smoothstep(${(GR.R-22).toFixed(1)},${(GR.R-6).toFixed(1)},fd);
+  // look: world colour patches, tawny tips on dry ground, seed heads, ground-matched far ring, gust sheen, sun through the blades
+  float fr=smoothstep(${(GR.R-12).toFixed(1)},${(GR.R+2).toFixed(1)},fd)*.7;
+  float th=clamp(hh/.7,0.,1.);
   float pa=sin(ip.x*.083+sin(ip.y*.061)*2.2)*sin(ip.y*.071+sin(ip.x*.047)*2.)*.5+.5;
-  vec3 patchT=mix(vec3(.74,1.,.72),vec3(1.04,1.03,.76),smoothstep(.3,.85,pa));
+  vec3 tint=mix(vec3(.8,1.,.76),vec3(1.04,1.03,.8),smoothstep(.3,.85,pa))*mix(vec3(1.),vec3(1.1,1.02,.84),iGr.z*th);
   #ifdef USE_INSTANCING_COLOR
-  vColor.rgb=mix(vColor.rgb*patchT,instanceColor,fr);
+  vec3 gc=vColor.rgb*tint;
+  #ifndef BQ_GS
+  gc=mix(gc,instanceColor*vec3(1.55,1.3,.95),iGr.y*gS.w*.8);
+  #endif
+  vColor.rgb=mix(gc,instanceColor*1.12,fr)*(1.+.12*smoothstep(12.,26.,fd)); // lit tips still read against the turf at range
   #endif
   vec3 wp=(modelMatrix*mvPosition).xyz;
-  float th=clamp(hh/.62,0.,1.);
   float back=pow(max(dot(normalize(wp-cameraPosition),uSunW),0.),3.);
-  vGr=vec4(th,gust*th,th*(back*.85+.12),fr);
+  vGr=vec4(th,gust*th*(1.-fr),th*(back*.85+.12),fr);
   mvPosition=modelViewMatrix*mvPosition;
   gl_Position=projectionMatrix*mvPosition;`);
+    GRASS_FRAG(sh);
     sh.fragmentShader='uniform vec3 uSunCol;\nvarying vec4 vGr;\n'+sh.fragmentShader.replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
-  totalEmissiveRadiance+=diffuseColor.rgb*(uSunCol*vGr.z*.5+vec3(.26,.28,.18)*vGr.y)*(1.-vGr.w);`);
+  totalEmissiveRadiance+=diffuseColor.rgb*(uSunCol*vGr.z*.35+vec3(.3,.32,.24)*vGr.y)*(1.-vGr.w);`);
   };
   return mat;
 }
+function grassFarMaterial(){
+  const mat=G.toon('#ffffff',{vertexColors:true,side:THREE.DoubleSide});
+  mat.onBeforeCompile=sh=>{Object.assign(sh.uniforms,{uTime:SH.time,uFocus:SH.focus,uWind:SH.wind});
+    sh.vertexShader=WIND_GLSL+'\nuniform vec3 uFocus;\n'+sh.vertexShader
+      .replace('#include <begin_vertex>',`#include <begin_vertex>
+  vec2 ip=vec2(instanceMatrix[3][0],instanceMatrix[3][2]); float fd=length(ip-uFocus.xz), hs=fract(ip.x*.37+ip.y*.73);
+  transformed*=smoothstep(${(GR.R-10).toFixed(1)}+hs*5.,${(GR.R-4).toFixed(1)}+hs*3.,fd)*(1.-smoothstep(${(GRF.R-9).toFixed(1)}+hs*3.,${(GRF.R-1).toFixed(1)},fd));
+  transformed.xz*=1.+.35*smoothstep(26.,44.,fd); transformed.y*=1.+.12*smoothstep(26.,44.,fd);
+  transformed.xz+=uWind.xy*transformed.y*transformed.y*(sin(uTime*1.1+dot(ip,vec2(.05,.04)))*.3+.35+bqGust(ip)*.9);`);
+  GRASS_FRAG(sh); };
+  mat.customProgramCacheKey=()=>'bqGrassFar';
+  return mat;
+}
+function makeRing(o,geo,mat,K,N,name,extra){
+  if(o.mesh){ root.remove(o.mesh); o.mesh.dispose(); o.mesh=null; }
+  o.K=K; o.slots.length=0; o.fx=o.fz=1e9; o.queue.length=0; if(!K)return null;
+  const ns=o.off?o.off.length:N*N, total=ns*K, m=new THREE.InstancedMesh(geo,mat,total);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.setColorAt(0,_c.setRGB(1,1,1)); m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  if(extra){ const a=new THREE.InstancedBufferAttribute(new Float32Array(total*4),4); a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iGr',a); o.iGr=a; }
+  m.frustumCulled=false; m.receiveShadow=true; m.castShadow=false; m.name=name;
+  m.instanceMatrix.array.fill(0);
+  for(let i=0;i<ns;i++)o.slots.push({cx:1e9,cz:1e9});
+  root.add(m); o.mesh=m; return m;
+}
 function applyGrassQuality(){
   const q=GRQ[G.quality.level]||GRQ.balanced, m=GR.mat;
-  const d={}; if(q.lq)d.BQ_LQ=''; if(q.push)d.BQ_PUSH='';
-  m.defines=d; m.customProgramCacheKey=()=>'bqGrass'+(q.lq?'q':'')+(q.push?'p':''); m.needsUpdate=true;
+  const d={}; if(q.lq)d.BQ_LQ=''; if(q.push)d.BQ_PUSH=''; if(q.geo==='s')d.BQ_GS='';
+  m.defines=d; m.customProgramCacheKey=()=>'bqGrass'+(q.lq?'q':'')+(q.push?'p':'')+q.geo; m.needsUpdate=true;
   for(const fm of FOL.mats){ fm.defines=q.lq?{BQ_LQ:''}:{}; fm.needsUpdate=true; }
   GR.push=q.push;
-  if(grass&&GR.K===q.K)return;
-  GR.K=q.K;
-  if(grass){ root.remove(grass); grass.dispose(); }
-  const total=GR.N*GR.N*GR.K;
-  grass=new THREE.InstancedMesh(GR.geo,m,total);
-  grass.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  grass.setColorAt(0,_c.setRGB(1,1,1)); grass.instanceColor.setUsage(THREE.DynamicDrawUsage);
-  grass.frustumCulled=false; grass.receiveShadow=true; grass.castShadow=false; grass.name='grass';
-  grass.instanceMatrix.array.fill(0);
-  GR.slots.length=0; for(let i=0;i<GR.N*GR.N;i++)GR.slots.push({cx:1e9,cz:1e9});
-  GR.fx=GR.fz=1e9; GR.queue.length=0;
-  root.add(grass);
-  W.stats.grassTufts=total;
+  if(grass&&GR.K===q.K&&GR.kind===q.geo&&GRF.K===q.KF&&GR.sc===q.sc)return;
+  GR.sc=q.sc;
+  if(GR.kind!==q.geo){ if(GR.geo)GR.geo.dispose(); GR.geo=buildGrassGeo(q.geo); GR.kind=q.geo; }
+  GR.mesh=grass; grass=makeRing(GR,GR.geo,m,q.K,GR.N,'grass',true);
+  if(!GRF.geo){ GRF.geo=buildFarGeo(); GRF.mat=grassFarMaterial(); }
+  makeRing(GRF,GRF.geo,GRF.mat,q.KF,GRF.N,'grassFar',false);
+  W.stats.grassTufts=GR.slots.length*GR.K;
 }
 function buildGrass(){
-  GR.geo=buildGrassGeo(); GR.mat=grassMaterial();
+  GR.mat=grassMaterial();
   applyGrassQuality();
   G.on('quality',()=>{ applyGrassQuality(); updateGrass(true); });
 }
@@ -1934,50 +2138,89 @@ function updatePushers(){
   }
   for(;n<PUSHN;n++)P[n].w=0;
 }
+/** where a tuft may grow: ground height there, or null (water, steep or bare rock, trail, buildings, thinned wood/shore) */
+function tuftGround(x,z,keep){
+  const h=gh(x,z); if(h<1.4)return null;
+  const sl=Math.hypot(gh(x+.7,z)-gh(x-.7,z),gh(x,z+.7)-gh(x,z-.7))/1.4;
+  if(sl>.85)return null;
+  if(x<-60&&keep>lerp(1,.32,smooth(-60,-80,x)))return null;
+  if(h<2.4&&keep>.25)return null;
+  if(pathDist(x,z)<1.5)return null;
+  if(x>108&&h>41.9&&keep>.2&&Math.min(gh(x+1.7,z),gh(x-1.7,z),gh(x,z+1.7),gh(x,z-1.7))<39)return null;   // bare rock along the rim
+  const L=LM.lighthouse; if((x-L.x)*(x-L.x)+(z-L.z)*(z-L.z)<92)return null;
+  if(x>140&&inFoot(x,z,.2))return null;
+  if(x<0&&x>-40&&inFoot(x,z,0))return null;
+  return h;
+}
+const _gp=new THREE.Color(.25,.31,.16); // pale sea-turf
 function fillGrassSlot(si,cx,cz){
   const s=GR.slots[si]; s.cx=cx; s.cz=cz;
-  const arr=grass.instanceMatrix.array, carr=grass.instanceColor.array, K=GR.K, CS=GR.C;
+  const arr=grass.instanceMatrix.array, carr=grass.instanceColor.array, ga=GR.iGr.array, K=GR.K, CS=GR.C, full=GR.kind!=='s';
+  const WX=SH.wind.value.x, WZ=SH.wind.value.y;
   let seed=((cx*73856093)^(cz*19349663))>>>0; const rr=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
-  const L=LM.lighthouse;
   for(let k=0;k<K;k++){
     const o=(si*K+k)*16, x=cx*CS+rr()*CS, z=cz*CS+rr()*CS, rot=rr()*TAU, sc=rr(), keep=rr();
-    let ok=true; const h=gh(x,z);
-    if(h<1.4)ok=false;
-    else{
-      const fx=x-GX0,fz=z-GZ0;
-      const sl=Math.hypot(gh(x+.7,z)-gh(x-.7,z),gh(x,z+.7)-gh(x,z-.7))/1.4;
-      if(sl>.85)ok=false;
-      else if(x<-60&&keep>lerp(1,.32,smooth(-60,-80,x)))ok=false;
-      else if(h<2.4&&keep>.25)ok=false;
-      else if(pathDist(x,z)<1.5)ok=false;
-      else if(x>108&&h>41.9&&keep>.2&&Math.min(gh(x+1.7,z),gh(x-1.7,z),gh(x,z+1.7),gh(x,z-1.7))<39)ok=false;   // bare rock along the rim
-      else if((x-L.x)*(x-L.x)+(z-L.z)*(z-L.z)<92)ok=false;
-      else if(x>140&&inFoot(x,z,.2))ok=false;
-      else if(x<0&&x>-40&&inFoot(x,z,0))ok=false;
-      if(ok){const gi=Math.round(fx),gj=Math.round(fz),a=(gj*GNX+gi)*3;
-        _c.setRGB(HC[a],HC[a+1],HC[a+2]).multiplyScalar(.92+sc*.2);
-        carr[(si*K+k)*3]=_c.r;carr[(si*K+k)*3+1]=_c.g;carr[(si*K+k)*3+2]=_c.b;}
-    }
-    if(!ok){for(let q=0;q<16;q++)arr[o+q]=0;continue;}
-    const s=.75+sc*.75, sy=s*(.8+keep*.5)*(h>41?.85:1), c=Math.cos(rot)*s, n=Math.sin(rot)*s;
-    arr[o]=c;arr[o+1]=0;arr[o+2]=-n;arr[o+3]=0; arr[o+4]=0;arr[o+5]=sy;arr[o+6]=0;arr[o+7]=0;
+    const h=tuftGround(x,z,keep);
+    if(h===null){for(let q=0;q<16;q++)arr[o+q]=0;continue;}
+    // what kind of ground: damp wood, sea turf on the headland, dry moor (reddish ground colour = heather/ochre), shore, trail side
+    const gi=Math.round(x-GX0),gj=Math.round(z-GZ0),a=(gj*GNX+gi)*3, r0=HC[a],g0=HC[a+1],b0=HC[a+2];
+    const wood=smooth(-58,-84,x), head=x>110&&h>30?smooth(30,41.5,h):0, shore=1-smooth(1.8,3.4,h);
+    const dry=smooth(.6,1.15,r0/Math.max(g0,1e-4))*(1-wood), pd=pathDist(x,z), trod=smooth(1.5,3.2,pd);
+    const h1=ghash(x,z,1), h2=ghash(x,z,2), h3=ghash(x,z,3);
+    let stalk=0, narrow=1;
+    if(full&&h2<(.18+.25*dry)*(1-head*.8)*(1-wood*.8)*(1-shore)*trod)stalk=1;
+    if(h3<.1+.4*head+.1*dry+.3*shore)narrow=.74;
+    const hf=(x>-70?lerp(1,.86,flowerDrift(x,z)):1)*lerp(1,1.15,wood)*lerp(1,.5,head)*lerp(1,.6,shore)*lerp(.68,1,trod)*(narrow<1?.9:1);
+    _c.setRGB(r0,g0*lerp(1,1.04,wood),b0).multiplyScalar((.92+sc*.2)*lerp(1,.9,wood));
+    if(head>0)_c.lerp(_gp,.22*head);
+    const ci=(si*K+k)*3; carr[ci]=_c.r;carr[ci+1]=_c.g;carr[ci+2]=_c.b;
+    const gq=(si*K+k)*4; ga[gq]=0; ga[gq+1]=stalk; ga[gq+2]=Math.min(1,dry*1.2+head*.35); ga[gq+3]=h1*.6+h3*.4;
+    const open=(1-wood)*(1-head)*(1-shore)*trod; // open moor and meadow stand a little taller
+    const sx=(1+sc*.75)*narrow*(1+.22*dry)*GR.sc, sy=Math.min(1.56,(.95+ghash(x,z,4)*.65)*hf*(1+.08*dry)*(1+.1*open))*Math.sqrt(GR.sc), c=Math.cos(rot)*sx, n=Math.sin(rot)*sx;
+    const comb=(.08+.32*head)*sy; // tufts on open ground lie a little downwind; the sea turf is combed flat by it
+    arr[o]=c;arr[o+1]=0;arr[o+2]=-n;arr[o+3]=0; arr[o+4]=WX*comb;arr[o+5]=sy;arr[o+6]=WZ*comb;arr[o+7]=0;
     arr[o+8]=n;arr[o+9]=0;arr[o+10]=c;arr[o+11]=0; arr[o+12]=x;arr[o+13]=h-.04;arr[o+14]=z;arr[o+15]=1;
   }
 }
-function updateGrass(all){
-  const f=G.focus, C=GR.C, N=GR.N, half=(N-1)/2;
-  SH.focus.value.copy(f);
+function fillFarSlot(si,cx,cz){
+  const s=GRF.slots[si]; s.cx=cx; s.cz=cz; const m=GRF.mesh;
+  const arr=m.instanceMatrix.array, carr=m.instanceColor.array, K=GRF.K, CS=GRF.C;
+  let seed=((cx*83492791)^(cz*2654435761))>>>0; const rr=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  for(let k=0;k<K;k++){
+    const o=(si*K+k)*16, x=cx*CS+rr()*CS, z=cz*CS+rr()*CS, rot=rr()*TAU, sc=rr(), keep=rr();
+    const h=tuftGround(x,z,keep); if(h===null||pathDist(x,z)<2.5){for(let q=0;q<16;q++)arr[o+q]=0;continue;}
+    const a=(Math.round(z-GZ0)*GNX+Math.round(x-GX0))*3, head=x>110&&h>30?.55:1;
+    _c.setRGB(HC[a],HC[a+1],HC[a+2]).multiplyScalar(.9+sc*.2); const ci=(si*K+k)*3; carr[ci]=_c.r;carr[ci+1]=_c.g;carr[ci+2]=_c.b;
+    const sx=(.95+sc*.6)*GR.sc, sy=(.85+keep*.45)*head*lerp(1,.6,1-smooth(1.8,3.4,h)), c=Math.cos(rot)*sx, n=Math.sin(rot)*sx;
+    arr[o]=c;arr[o+1]=0;arr[o+2]=-n;arr[o+3]=0; arr[o+4]=0;arr[o+5]=sy;arr[o+6]=0;arr[o+7]=0;
+    arr[o+8]=n;arr[o+9]=0;arr[o+10]=c;arr[o+11]=0; arr[o+12]=x;arr[o+13]=h-.03;arr[o+14]=z;arr[o+15]=1;
+  }
+}
+function ringStep(o,fill,all,per){
+  const f=G.focus, C=o.C, N=o.N, half=(N-1)/2;
   const fcx=Math.floor(f.x/C), fcz=Math.floor(f.z/C);
-  if(fcx!==GR.fx||fcz!==GR.fz){GR.fx=fcx;GR.fz=fcz;GR.queue.length=0;
+  if(o.off&&(fcx!==o.fx||fcz!==o.fz)){o.fx=fcx;o.fz=fcz;o.queue.length=0;
+    // disc of cells: slots whose cell is still wanted keep it, the others take the cells that came into the disc
+    const need=new Map(), free=[], want=[];
+    for(const [i,j] of o.off)need.set((fcx+i)*4096+(fcz+j),[fcx+i,fcz+j,Math.abs(i)+Math.abs(j)]);
+    o.slots.forEach((s,si)=>{ const k=s.cx*4096+s.cz; if(s.cx<1e8&&need.has(k))need.delete(k); else free.push(si); });
+    let f0=0; for(const [,c] of need)want.push([free[f0++],c[0],c[1],c[2]]);
+    want.sort((a,b)=>a[3]-b[3]); o.queue=want;}
+  else if(fcx!==o.fx||fcz!==o.fz){o.fx=fcx;o.fz=fcz;o.queue.length=0;
     const want=[];
     for(let i=0;i<N;i++)for(let j=0;j<N;j++){
-      const cx=fcx-half+(((i-(fcx-half))%N)+N)%N, cz=fcz-half+(((j-(fcz-half))%N)+N)%N, si=j*N+i, s=GR.slots[si];
+      const cx=fcx-half+(((i-(fcx-half))%N)+N)%N, cz=fcz-half+(((j-(fcz-half))%N)+N)%N, si=j*N+i, s=o.slots[si];
       if(s.cx!==cx||s.cz!==cz)want.push([si,cx,cz,Math.abs(cx-fcx)+Math.abs(cz-fcz)]);}
-    want.sort((a,b)=>a[3]-b[3]); GR.queue=want;}
-  if(!GR.queue.length)return;
-  const n=all?GR.queue.length:Math.min(GR.queue.length,4);
-  for(let i=0;i<n;i++){const q=GR.queue.shift(); fillGrassSlot(q[0],q[1],q[2]);}
-  grass.instanceMatrix.needsUpdate=true; grass.instanceColor.needsUpdate=true;
+    want.sort((a,b)=>a[3]-b[3]); o.queue=want;}
+  if(!o.queue.length)return false;
+  const n=all?o.queue.length:Math.min(o.queue.length,per);
+  for(let i=0;i<n;i++){const q=o.queue.shift(); fill(q[0],q[1],q[2]);}
+  return true;
+}
+function updateGrass(all){
+  SH.focus.value.copy(G.focus);
+  if(ringStep(GR,fillGrassSlot,all,4)){ grass.instanceMatrix.needsUpdate=true; grass.instanceColor.needsUpdate=true; GR.iGr.needsUpdate=true; }
+  if(GRF.mesh&&ringStep(GRF,fillFarSlot,all,2)){ GRF.mesh.instanceMatrix.needsUpdate=true; GRF.mesh.instanceColor.needsUpdate=true; }
 }
 
 /* ---------- drifting ground mist ---------- */
