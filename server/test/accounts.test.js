@@ -1003,9 +1003,10 @@ describe('stubs for the save-slot and admin routes', () => {
       assert.equal((await call(on, { 'X-Admin-Email': 'a@b.cd' })).status, 401);
       const noEmail = await call(on, { 'X-Admin-Key': KEY });
       assert.deepEqual([noEmail.status, await noEmail.json()], [400, { error: 'admin_email' }]);
+      // Past the guard the admin routes answer (they are tested in admin.test.js).
       const ok = await call(on, good);
-      assert.deepEqual([ok.status, await ok.json()], [501, { error: 'not_implemented' }]);
-      assert.equal((await call(on, good, '/admin/v1')).status, 501);
+      assert.deepEqual([ok.status, (await ok.json()).total], [200, 0]);
+      assert.equal((await call(on, good, '/admin/v1')).status, 404);
       // Outside the prefix nothing changes.
       assert.equal((await call(on, good, '/admin/v2')).status, 404);
     } finally {

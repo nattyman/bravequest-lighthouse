@@ -13,6 +13,30 @@ import { PASSWORD, SIGN_IN } from './limits.js';
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
+const linkHashFor = (ctx, token) => ctx.secretHash(`link:${token}`);
+const codeHashFor = (ctx, id, code) => ctx.secretHash(`code:${id}:${code}`);
+
+function signInLink(ctx, token) {
+  const base = ctx.config.appUrl;
+  return `${base}${base.includes('?') ? '&' : '?'}signin=${token}`;
+}
+
+/**
+ * Creates a sign-in (link + six-digit code, 15 minutes, once) for an address and builds its email.
+ * Used by POST /v1/auth/start and by the admin's "send sign-in email". -> { id, message }
+ */
+export async function createSignIn(ctx, email) {
+  const id = randomToken(SIGN_IN.idBytes);
+  const token = randomToken(SIGN_IN.tokenBytes);
+  const code = sixDigitCode();
+  const at = ctx.now();
+  await ctx.store.signIns.create({
+    id, email, linkHash: linkHashFor(ctx, token), codeHash: codeHashFor(ctx, id, code), at, expiresAt: at + SIGN_IN.lifetimeMs,
+  });
+  const message = signInEmail({ link: signInLink(ctx, token), code, minutes: Math.round(SIGN_IN.lifetimeMs / 60_000) });
+  return { id, message };
+}
+
 export function authRoutes(ctx) {
   const { store, limits, now, log, hasher } = ctx;
 
@@ -27,13 +51,8 @@ export function authRoutes(ctx) {
       .catch((err) => log(`mail failed (${what}) ${err?.code || err?.name || 'Error'}`));
   }
 
-  const linkHash = (token) => ctx.secretHash(`link:${token}`);
-  const codeHash = (id, code) => ctx.secretHash(`code:${id}:${code}`);
-
-  function signInLink(token) {
-    const base = ctx.config.appUrl;
-    return `${base}${base.includes('?') ? '&' : '?'}signin=${token}`;
-  }
+  const linkHash = (token) => linkHashFor(ctx, token);
+  const codeHash = (id, code) => codeHashFor(ctx, id, code);
 
   /** A link or code was right: find or create the account, start a session, answer with `me`. */
   async function finishSignIn(req, res, email) {
@@ -53,16 +72,10 @@ export function authRoutes(ctx) {
     if (!body) return;
     const email = ctx.normaliseEmail(body.email);
     if (!email) return send(res, 400, { error: 'bad_email' });
-    const id = randomToken(SIGN_IN.idBytes);
     // Over the per-address limit: the same answer, and no email. Nothing says whether the address has an account.
-    if (!limits.startPerEmail.take(sha256Hex(email)).ok) return send(res, 200, { ok: true, id });
-    const token = randomToken(SIGN_IN.tokenBytes);
-    const code = sixDigitCode();
-    const at = now();
-    await store.signIns.create({
-      id, email, linkHash: linkHash(token), codeHash: codeHash(id, code), at, expiresAt: at + SIGN_IN.lifetimeMs,
-    });
-    mailLater(email, signInEmail({ link: signInLink(token), code, minutes: Math.round(SIGN_IN.lifetimeMs / 60_000) }), 'sign-in');
+    if (!limits.startPerEmail.take(sha256Hex(email)).ok) return send(res, 200, { ok: true, id: randomToken(SIGN_IN.idBytes) });
+    const { id, message } = await createSignIn(ctx, email);
+    mailLater(email, message, 'sign-in');
     ctx.pruneSoon();
     return send(res, 200, { ok: true, id });
   }

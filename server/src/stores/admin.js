@@ -11,8 +11,15 @@
 // store.settings
 //   get(key) -> value | null      (value is any JSON value)
 //   set(key, value)
+//
+// store.admin (the account queries only the private admin API needs)
+//   listAccounts({ q, role, status, page = 1, per = 50 })
+//       -> { total, rows: [{ id, email, displayName, role, status, createdAt, lastSeenAt, saves }] }
+//       newest first (created, then id). q: case-insensitive substring of the email or the keeper name
+//       (taken literally: no wildcards). role / status: exact match when given. saves = used slots.
+//       page is 1-based; per is 1..200 (default 50).
 
-import { TS } from './accounts.js';
+import { TS, accountFromRow } from './accounts.js';
 
 export const ADMIN_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS audit (
@@ -30,11 +37,18 @@ export const ADMIN_SCHEMA = [
    )`,
 ];
 
+export const MAX_PER_PAGE = 200;
 const page = ({ page: p = 1, per = 50 } = {}) => {
-  const n = Math.max(1, Math.min(200, Math.floor(Number(per)) || 50));
+  const n = Math.max(1, Math.min(MAX_PER_PAGE, Math.floor(Number(per)) || 50));
   const pg = Math.max(1, Math.floor(Number(p)) || 1);
   return { per: n, offset: (pg - 1) * n };
 };
+
+const listRow = (a, saves) => ({
+  id: a.id, email: a.email, displayName: a.displayName, role: a.role, status: a.status,
+  createdAt: a.createdAt, lastSeenAt: a.lastSeenAt, saves,
+});
+const cleanQuery = (q) => (typeof q === 'string' ? q.trim().toLowerCase() : '');
 
 export function memoryAdminStores(mem) {
   let seq = 0;
@@ -62,7 +76,22 @@ export function memoryAdminStores(mem) {
       mem.settings.set(key, JSON.stringify(value));
     },
   };
-  return { audit, settings };
+  const admin = {
+    async listAccounts({ q, role, status, ...opts } = {}) {
+      const { per, offset } = page(opts);
+      const needle = cleanQuery(q);
+      const all = [...mem.accounts.values()]
+        .filter((a) => !needle || a.email.toLowerCase().includes(needle) || a.displayName.toLowerCase().includes(needle))
+        .filter((a) => !role || a.role === role)
+        .filter((a) => !status || a.status === status)
+        .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+      return {
+        total: all.length,
+        rows: all.slice(offset, offset + per).map((a) => listRow(a, mem.accountSaves.get(a.id)?.size ?? 0)),
+      };
+    },
+  };
+  return { audit, settings, admin };
 }
 
 export function pgAdminStores(pool) {
@@ -104,5 +133,24 @@ export function pgAdminStores(pool) {
       );
     },
   };
-  return { audit, settings };
+  const admin = {
+    async listAccounts({ q, role, status, ...opts } = {}) {
+      const { per, offset } = page(opts);
+      const where = `($1::text = '' OR position($1 in lower(a.email)) > 0 OR position($1 in lower(a.display_name)) > 0)
+                 AND ($2::text IS NULL OR a.role = $2) AND ($3::text IS NULL OR a.status = $3)`;
+      const params = [cleanQuery(q), role || null, status || null];
+      const total = (await pool.query(`SELECT count(*)::int AS n FROM accounts a WHERE ${where}`, params)).rows[0].n;
+      const { rows } = await pool.query(
+        `SELECT a.id::text AS id, a.email, a.password_hash, a.role, a.tools, a.display_name, a.name_key, a.status,
+                (extract(epoch FROM a.created_at) * 1000)::bigint AS created_at,
+                (extract(epoch FROM a.last_seen_at) * 1000)::bigint AS last_seen_at,
+                (SELECT count(*)::int FROM account_saves s WHERE s.account_id = a.id) AS saves
+           FROM accounts a WHERE ${where}
+          ORDER BY a.created_at DESC, a.id DESC LIMIT $4 OFFSET $5`,
+        [...params, per, offset],
+      );
+      return { total, rows: rows.map((r) => listRow(accountFromRow(r), r.saves)) };
+    },
+  };
+  return { audit, settings, admin };
 }
