@@ -494,7 +494,7 @@ function buildCard(){
         :o.why==='rate'?'Too many tries in a short time. Wait '+waitText(o.wait||60)+', then send yourself a new link.'
         :'Sign-in links work once, within 15 minutes. Send yourself a new one: it only takes a moment.';
       lGo.textContent=o.ok?'Carry on':'Send a new link'; lGo.dataset.act=o.ok?'':'new'; lNew.hidden=!!o.ok;
-      show('linked'); return; }
+      show('linked'); card.dataset.padBack=o.ok?'acLinkedGo':'acLinkedNo'; return; }
     if(A.state==='in'){ mName.value=A.me&&A.me.name||''; show('account'); }
     else { if(!o.keepEmail)pPw.value=''; show('email'); if(A.offline)tell('Couldn’t reach the save service just now; you can still try.'); }
   }
@@ -541,9 +541,10 @@ function close(){ if(ui&&ui.view)ui.close(); }
 let linkToken='';
 if(ON){
   try{
-    const u=new URL(location.href), t=u.searchParams.get('signin');
-    if(t!=null){ linkToken=t.slice(0,200); u.searchParams.delete('signin');
-      history.replaceState(history.state,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams.toString():'')+u.hash); }
+    const t=new URLSearchParams(location.search).get('signin');
+    if(t!=null){ linkToken=t.slice(0,200);       // the rest of the address stays exactly as it was (?debug, ?headless have no '=')
+      const q=location.search.replace(/^\?/,'').split('&').filter(x=>x&&!/^signin(=|$)/.test(x)).join('&');
+      history.replaceState(history.state,'',location.pathname+(q?'?'+q:'')+location.hash); }
   }catch(_){}
 }
 let booted=false;

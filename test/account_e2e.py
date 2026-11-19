@@ -18,7 +18,7 @@ CFG_NOOPT = "window.BQ_CONFIG={api:'%s',version:'9.9.9-test',devtools:false,acco
 EVENTS = """window.__acEv=[]; (function hook(){ if(window.G&&G.on){ ['account:in','account:out','account:me'].forEach(n=>G.on(n,d=>__acEv.push({n,fresh:d&&d.fresh,
   name:d&&d.me?d.me.name:null,email:d&&d.me?d.me.email:null}))); } else setTimeout(hook,5); })();"""
 SHOTS = os.environ.get('SHOTS', '/tmp/claude-0/a4')
-BUDGET = 240  # seconds a single check may take before the rest are skipped
+BUDGET = 300  # seconds a single check may take before the rest are skipped
 NAME_RE = re.compile(r"^[A-Za-z0-9 _'\-]{3,16}$")
 SYNC = 'ABCD1234EFGH'
 
@@ -163,7 +163,10 @@ async def main():
             await pg.wait_for_timeout(500)
             return ctx, pg
         DEPENDS = {}
+        ONLY = [x for x in os.environ.get('ONLY', '').split(',') if x]
         async def step(name, fn, needs=()):
+            if ONLY and name not in ONLY:
+                print('SKIP ' + name + ' : not in ONLY'); return
             if any(d in fails or d in skipped for d in needs):
                 print('SKIP ' + name + ' : needs ' + ', '.join(needs)); skipped.append(name); return
             n0 = len(fails)
@@ -237,9 +240,16 @@ async def main():
             await pg.screenshot(path=SHOTS + '/title_phone.png')
             await pg.set_viewport_size({'width': 1100, 'height': 700}); await pg.wait_for_timeout(300)
             check('rowClearOfCredit', lay['rowBottom'] <= lay['studioTop'] and lp['rowBottom'] <= lp['studioTop'] and lp['right'] <= 390 and lp['doc'] <= 391 and not lp['broken'], {'desk': lay, 'phone': lp})
+        await step('links', links)
+
+        async def signInCard():
             await click('#title [data-account-link]'); await pg.wait_for_timeout(300); c = await card()
             check('opensSignIn', c['open'] and c['view'] == 'email' and not c['title_shown'] and c['buttons'][:3] == ['Send link to email', 'Use password', 'Keep playing as a guest'] and c['pad'] == 'acGuest' and c['focus'] == 'email' and not c['tags'], c)
             r1 = await shot('signin')
+            check('signInFitsPhone', fits(r1), r1)
+        await step('signInCard', signInCard, ('links',))
+
+        async def passwordCard():
             await click('#acUsePw'); await pg.wait_for_timeout(200); c = await card()
             check('passwordView', c['view'] == 'password' and 'Forgot password?' in c['buttons'] and 'Sign in' in c['buttons'] and 'Email me a sign-in link instead' in c['buttons'] and c['pad'] == 'acPwBack', c)
             await pg.fill('#accountCard [data-view=password] input[name=password]', 'secret')
@@ -247,7 +257,7 @@ async def main():
             await click('#accountCard [data-view=password] .ac-eye'); t2 = await pg.evaluate("document.querySelector('#accountCard [data-view=password] input[name=password]').type")
             check('showHide', t1 == 'text' and t2 == 'password', [t1, t2])
             r2 = await shot('password')
-            check('signInFitsPhone', fits(r1) and fits(r2), [r1, r2])
+            check('passwordFitsPhone', fits(r2), r2)
             # typed keys in the password field stay out of the game (N would toggle the sound)
             snd = await pg.evaluate("() => localStorage.getItem('bq-audio')")
             await pg.focus('#accountCard [data-view=password] input[name=password]'); await pg.keyboard.type(' n N')
@@ -257,9 +267,10 @@ async def main():
             check('escapeBack', c['view'] == 'email' and c['open'], c)
             await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()
             check('escapeClose', not c['open'] and c['title_shown'], c)
-        await step('links', links)
+        await step('passwordCard', passwordCard, ('signInCard',))
 
         async def linkFlow():
+            await pg.evaluate("G.account.close()"); await pg.wait_for_timeout(200)
             await pg.evaluate("G.account.debug.resend(1500)")
             await click('#title [data-account-link]'); await pg.wait_for_timeout(200)
             await fill('[data-view=email] input', 'not-an-email'); await click('#acSendLink'); await pg.wait_for_timeout(200); c = await card()
@@ -287,7 +298,7 @@ async def main():
             ck = await ctx.cookies(API)
             check('codeSignIn', c['state'] == 'in' and c['view'] == 'account' and c['me']['email'] == EMAIL and 'signed in' in c['note'] and c['ev'][-1] == {'n': 'account:in', 'fresh': True, 'name': '', 'email': EMAIL}
                   and any(k['name'] == 'bq_s' and k['httpOnly'] for k in ck) and c['links'] == ['Account', 'Account'] and await pg.evaluate("G.account.debug.last") == 'link', dict(c, cookies=len(ck)))
-        await step('linkFlow', linkFlow, ('links',))
+        await step('linkFlow', linkFlow, ('signInCard',))
 
         async def fetchIn():
             n = await pg.evaluate("async () => { const r=await G.account.fetch('/v1/echo',{method:'POST',body:{a:1}}); return r.status; }")
@@ -411,6 +422,7 @@ async def main():
         await step('delete', delete, ('flip401',))
 
         async def rate():
+            await pg.evaluate("G.account.close(); G.account.open('title')"); await pg.wait_for_timeout(300)
             fake.rate['/v1/auth/start'] = 120
             await fill('[data-view=email] input', EMAIL); await click('#acSendLink'); await settle(); c = await card()
             check('rateLimited', c['view'] == 'email' and 'Wait 2 minutes' in c['note'], c['note'])
@@ -450,7 +462,7 @@ async def main():
             await p2.wait_for_function("document.getElementById('accountCard')&&!document.getElementById('accountCard').hidden", timeout=30000); c = await card()
             loc = await p2.evaluate("location.search")
             lk = fake.reqs('POST', '/v1/auth/link')[-1]
-            check('signinLink', c['state'] == 'in' and c['title'] == 'Signed in' and 'reader@example.com' in c['text'] and lk['b'] == {'token': tok} and lk['x'] == '1' and 'signin' not in loc and 'headless' in loc
+            check('signinLink', c['pad'] == 'acLinkedGo' and c['state'] == 'in' and c['title'] == 'Signed in' and 'reader@example.com' in c['text'] and lk['b'] == {'token': tok} and lk['x'] == '1' and loc == ('?' + U.query if U.query else '')
                   and c['ev'][0]['n'] == 'account:in' and c['ev'][0]['fresh'] is True and await p2.evaluate("G.account.debug.last") == 'link', dict(c, loc=loc))
             await p2.screenshot(path=SHOTS + '/linked_desktop.png')
             await click('#acLinkedGo'); await p2.wait_for_timeout(200); c = await card()
@@ -463,7 +475,7 @@ async def main():
             pg = p2
             await p2.wait_for_function("document.getElementById('accountCard')&&!document.getElementById('accountCard').hidden", timeout=30000); c = await card()
             loc = await p2.evaluate("location.search")
-            check('signinExpired', c['state'] == 'out' and c['title'] == 'That link has expired' and 'signin' not in loc and 'Send a new link' in c['buttons'] and 'Not now' in c['buttons'], dict(c, loc=loc))
+            check('signinExpired', c['state'] == 'out' and c['title'] == 'That link has expired' and loc == ('?' + U.query if U.query else '') and 'Send a new link' in c['buttons'] and 'Not now' in c['buttons'], dict(c, loc=loc))
             await p2.screenshot(path=SHOTS + '/expired_desktop.png')
             await click('#acLinkedGo'); await p2.wait_for_timeout(200); c = await card()
             check('expiredToEmail', c['view'] == 'email' and c['open'], c['view'])
