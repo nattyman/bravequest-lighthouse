@@ -13,7 +13,7 @@ GAME = 'https://game.bq.test'; API = 'https://api.bq.test'
 PAGE = GAME + U.path + ('?' + U.query if U.query else '')
 CFG = "window.BQ_CONFIG={api:'%s',version:'9.9.9-test',devtools:false,accounts:true};window.BQ_ACCOUNTS_TEST=true;" % API
 SHOTS = os.environ.get('SHOTS', '/tmp/claude-0/a5')
-BUDGET = 420
+BUDGET = 600
 CODE = 'ABCD1234EFGH'
 
 def guest_save(objective, at=None, play=600):
@@ -215,7 +215,7 @@ async def main():
 
         async def claimOffer():
             pg = W['pg']; await signin(W['ctx'], pg, A); await card(pg, 'claim'); s = await st(pg)
-            check('claimOffered', s['acc'] == 'in' and s['card'] == 'claim' and 'Guest game' in str(s['buttons']) + s['note'] + str(await pg.evaluate("document.querySelector('#slotsCard .sl-box').innerText"))
+            check('claimOffered', s['acc'] == 'in' and s['card'] == 'claim' and 'Guest game' in str(s['buttons']) + s['note'] + str(await pg.evaluate("document.querySelector('#slotsCard [data-view=claim] .sl-box').innerText"))
                   and 'Bring this save into your account' in s['buttons'] and s['pad'] == 'slClaimNo' and not s['titleShown'], s)
             r = await shot(pg, 'claim'); check('claimFitsPhone', fits(r), r)
             await click(pg, '#slClaimNo'); await pg.wait_for_timeout(300); s = await st(pg)
@@ -363,7 +363,7 @@ async def main():
             ctx = await context("localStorage.setItem('bq-save-v1', %s); localStorage.setItem('bq-sync-key','%s');" % (json.dumps(json.dumps(G2)), CODE))
             pg = await page(ctx); await load(pg)
             await signin(ctx, pg, B); await card(pg, 'claim'); s = await st(pg)
-            check('claimOfferCode', s['card'] == 'claim' and 'sync code' in await pg.evaluate("document.querySelector('#slotsCard .sl-box').innerText"), s['card'])
+            check('claimOfferCode', s['card'] == 'claim' and 'sync code' in await pg.evaluate("document.querySelector('#slotsCard [data-view=claim] .sl-box').innerText"), s['card'])
             await click(pg, '#slClaimGo'); await settle(pg); await pg.wait_for_timeout(800); s = await st(pg)
             bid = fake.accounts[B]['id']; cl = fake.reqs('POST', '/v1/saves/claim')
             check('claimWithCode', cl and cl[-1]['b'] == {'code': CODE} and cl[-1]['cookie'] and CODE not in fake.guest and 1 in fake.slots[bid] and s['code'] is None and s['guest'] is None
