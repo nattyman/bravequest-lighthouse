@@ -175,16 +175,22 @@ function wirePings(){
 function init(){
   const title=document.querySelector('#title .title-sheet'), pause=document.querySelector('#pause .sheet'), ending=document.querySelector('#ending .sheet');
   if(title){ const r=linksRow(title);
-    if(API&&G.cloud&&G.cloud.sync&&G.cloud.sync.available)link(r,'Sync devices',b=>openSync('title',b));
+    if(API&&G.cloud&&G.cloud.sync&&G.cloud.sync.available)link(r,'Sync devices',b=>openSync('title',b)).dataset.syncLink='title';
     if(API)link(r,'Send feedback',b=>openFeedback('title',b));
     if(VERSION){ const v=el('span','bq-ver'); v.textContent=VERSION; r.appendChild(v); } }
   if(pause){ const r=linksRow(pause);
-    if(API&&G.cloud&&G.cloud.sync&&G.cloud.sync.available)link(r,'Sync devices',b=>openSync('pause',b));
+    if(API&&G.cloud&&G.cloud.sync&&G.cloud.sync.available)link(r,'Sync devices',b=>openSync('pause',b)).dataset.syncLink='pause';
     if(API)link(r,'Send feedback',b=>openFeedback('pause',b));
     if(VERSION){ const v=el('span','bq-ver'); v.textContent=VERSION; r.appendChild(v); } }
   if(ending&&API){ const r=linksRow(ending); link(r,'Send feedback',b=>openFeedback('ending',b)); }
   if(API)wirePings();
+  syncLinks();
 }
+/* signed in to an account (js/account.js), saves follow the account: Sync devices only governs the guest save, so it is
+   hidden while signed in and comes back on sign-out */
+function syncLinks(){ const hide=!!(G.account&&G.account.state==='in');
+  for(const b of document.querySelectorAll('[data-sync-link]'))b.hidden=hide; }
+G.on('account:in',syncLinks); G.on('account:out',syncLinks);
 G.beta={ version:VERSION, openSync, openFeedback, ping };
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
 })();

@@ -24,6 +24,7 @@ class Fake:
         self.log = []; self.other = []; self.sessions = {}; self.saves = {}; self.records = {}
         self.account = {'id': 'acc1', 'email': 'keeper@example.com', 'name': '', 'role': 'player', 'tools': []}
         self.slots = True   # the account has a save slot that is not a test save
+        self.off = False    # the service has accounts switched off: account paths answer 503 accounts_off
         self.seed = [{'name': 'Keeper %02d' % i, 'act1': 1000 + i * 100} for i in range(5)] + [{'name': 'Taken Name', 'act1': 900}]
     def reqs(self, method=None, path=None): return [r for r in self.log if (method is None or r['m'] == method) and (path is None or r['p'] == path)]
     def new_session(self): t = secrets.token_urlsafe(24); self.sessions[t] = True; return t
@@ -49,6 +50,7 @@ class Fake:
             self.log.append({'m': rq.method, 'p': path, 'q': {k: v[0] for k, v in q.items()}, 'b': body, 't': time.time(), 'cookie': sess, 'auth': bearer, 'x': h.get('x-bq-client')})
         if rq.method == 'OPTIONS': return await send(204)
         if sess and rq.method not in ('GET', 'HEAD') and (h.get('x-bq-client') != '1' or origin != GAME): return await send(403, {'error': 'bad_origin'})
+        if self.off and (path == '/v1/me' or path.startswith('/v1/auth') or path.startswith('/v1/saves')): return await send(503, {'error': 'accounts_off'})
         A = self.account
         owner = 'a:' + A['id'] if sess else (bearer or None)
         if path == '/v1/me':
@@ -171,7 +173,7 @@ async def main():
             c = await card(pg)
             check('guestNeedsAccount', c['open'] and c['acct'] == 'out' and c['state']['needsAccount'] and 'A keeper name needs an account' in c['text']
                   and 'Sign in' in c['buttons'] and 'Not now' in c['buttons'] and not c['input'] and 'Turn on sync and join' not in c['buttons']
-                  and 'Join the board' not in c['buttons'] and 'needs sync' not in c['text'] and c['focus'] == 'boardSignIn', c)
+                  and 'Join the board' not in c['buttons'] and 'needs sync' not in c['text'] and 'With sync on' not in c['text'] and c['focus'] == 'boardSignIn', c)
             check('guestNameFits', await shots(pg, 'board_guest_needs_account'), '')
             await click(pg, 'Sign in'); await pg.wait_for_timeout(400)
             c = await card(pg)
@@ -281,12 +283,25 @@ async def main():
             await p2.fill('#boardCard [data-view=join] input', 'New Name'); await click(p2, 'Save name'); await settle(p2); c = await card(p2)
             put = fake.reqs('PUT', '/v1/record')[n0:]
             check('accountNeededHandled', len(put) == 1 and put[0]['b'].get('name') == 'New Name' and put[0]['auth'] == GUEST and fake.records[GUEST]['name'] == 'Old Name'
-                  and 'needs an account' in c['note'] and 'Sign in' in c['buttons'] and c['focus'] == 'boardSignIn' and c['state']['name'] == 'Old Name' and not c['state']['bad'], c)
+                  and 'needs an account' in c['note'] and 'Sign in' in c['buttons'] and c['focus'] == 'boardSignIn' and c['state']['name'] == 'Old Name' and not c['state']['bad']
+                  and 'are sent with your name' not in c['text'], c)
             await shots(p2, 'board_guest_account_needed')
             await click(p2, 'Leave the board'); await settle(p2); c = await card(p2)
             check('guestMayLeave', fake.records[GUEST]['name'] == '' and not c['state']['name'] and 'left the board' in c['note'], c['note'])
             await c2.close()
         await step('guestWithName', guestWithName)
+
+        # ---- the service has accounts switched off (a build with accounts): the board is the board of a build without them ----
+        async def accountsOff():
+            fake.off = True
+            c3, p3 = await device()
+            links = await p3.evaluate("[...document.querySelectorAll('#title .bq-links button')].filter(b=>!b.hidden&&b.getClientRects().length).map(b=>b.textContent)")
+            await p3.click('#title [data-board-link]'); await settle(p3); c = await card(p3)
+            check('accountsOffBoardAsGuest', 'Sign in' not in links and not c['state']['needsAccount'] and 'Sign in' not in c['buttons'] and 'needs an account' not in c['text']
+                  and 'Turn on sync and join' in c['buttons'] and c['input'], dict(c, links=links))
+            fake.off = False
+            await c3.close()
+        await step('accountsOff', accountsOff)
 
         errs = [e for q in pages for e in q.errs]
         check('onlyKnownEndpoints', not fake.other, fake.other[:5])

@@ -15,7 +15,7 @@
      with a code first), and the privacy page.
    - Button: "Sign in" / "Account" in the link row on the title and pause cards (.bq-links), after the
      Keepers' Board. Placed once the page has loaded and again on 'ready' / 'load', so any script order works.
-   API: G.account = { on, state:'off'|'checking'|'out'|'in', me, ready, can(group), fetch(path,opts),
+   API: G.account = { on, available, state:'off'|'checking'|'out'|'in', me, ready, can(group), fetch(path,opts),
                       open(from), close(), signOut(everywhere), refresh(), debug }
    Events: 'account:in' {me, fresh}  'account:out' {}  'account:me' {me} (me changed while signed in)
    ========================================================================= */
@@ -581,6 +581,7 @@ if(ON){
 
 G.account={
   on:ON,
+  get available(){ return ON&&!A.svcOff; },      // on, and the service has accounts switched on (it answered 503 accounts_off otherwise)
   get state(){ return A.state; },
   get me(){ return A.me; },
   ready, can, fetch:afetch, open, close, signOut, refresh,
