@@ -49,16 +49,21 @@ function syncCode(){
 /* ---- the one way the game calls the service ---- */
 function plainBody(b){ return b!=null&&typeof b==='object'&&!(typeof Blob!=='undefined'&&b instanceof Blob)&&!(typeof FormData!=='undefined'&&b instanceof FormData)
   &&!(typeof URLSearchParams!=='undefined'&&b instanceof URLSearchParams)&&!(b instanceof ArrayBuffer)&&!ArrayBuffer.isView(b); }
+const acctPath=p=>/^\/v1\/(me|auth|saves)(\/|$|\?)/.test(String(p||''));
 async function afetch(path,opts){
   opts=opts||{};
+  /* the service with accounts switched off (503 accounts_off) refuses the account header and credentials on its guest
+     routes (CORS): until /v1/me has answered, other calls wait for it; after a 503 they are plain guest calls */
+  if(ON&&A.state==='checking'&&!acctPath(path))await ready;
+  const acc=ON&&!A.svcOff;
   const url=/^https?:\/\//.test(String(path))?String(path):API+String(path||'');
   const h=new Headers(opts.headers||{});
   let body=opts.body;
   if(plainBody(body)){ body=JSON.stringify(body); if(!h.has('Content-Type'))h.set('Content-Type','application/json'); }
-  if(ON)h.set('X-BQ-Client','1');
+  if(acc)h.set('X-BQ-Client','1');
   if(A.state!=='in'&&opts.auth!==false&&!h.has('Authorization')){ const c=syncCode(); if(c)h.set('Authorization','Bearer '+c); }
   const init={method:opts.method||'GET',headers:h,body,cache:'no-store',keepalive:!!opts.keepalive};
-  if(ON)init.credentials='include';
+  if(acc)init.credentials='include';
   let ac=null, t=0;
   if(opts.signal)init.signal=opts.signal;
   else if(!opts.keepalive&&typeof AbortController==='function'&&opts.timeout!==0){
