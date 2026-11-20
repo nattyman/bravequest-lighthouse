@@ -136,7 +136,7 @@ async function send(extra,keepalive){
 /* a routine upload: throttled, silent */
 function push(o){
   o=o||{};
-  if(!canUpload())return Promise.resolve(false);
+  if(!canUpload()){ if(testSlot()&&!quiet())R.dirty=true; return Promise.resolve(false); }   // a test slot: sent once a real slot is active (slots:active)
   R.dirty=true; R.gen++;
   if(R.busy)return R.busy.then(()=>false,()=>false);
   const now=Date.now();

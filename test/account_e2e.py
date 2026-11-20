@@ -259,11 +259,20 @@ async def main():
             check('showHide', t1 == 'text' and t2 == 'password', [t1, t2])
             r2 = await shot('password')
             check('passwordFitsPhone', fits(r2), r2)
-            # typed keys in the password field stay out of the game (N would toggle the sound)
-            snd = await pg.evaluate("() => localStorage.getItem('bq-audio')")
-            await pg.focus('#accountCard [data-view=password] input[name=password]'); await pg.keyboard.type(' n N')
-            snd2 = await pg.evaluate("() => ({m:localStorage.getItem('bq-audio'), v:document.querySelector('#accountCard [data-view=password] input[name=password]').value})")
-            check('passwordTyping', snd2['m'] == snd and snd2['v'] == 'secret n N', {'before': snd, 'after': snd2})
+            # typed keys in the password field stay out of the game: N toggles the sound (audio.js), Space is jump (core.js's input),
+            # and no key reaches a listener past core.js's guard. First a control with nothing focused, to show the probes see a key that does reach the game.
+            probe = """() => { if(!window.__keys){ window.__keys=[]; document.addEventListener('keydown',e=>__keys.push(e.code)); } return {muted:!!(G.audio&&G.audio.settings&&G.audio.settings.muted), keys:__keys.length}; }"""
+            await pg.evaluate(probe)
+            await pg.evaluate("document.activeElement&&document.activeElement.blur()"); c0 = await pg.evaluate(probe)
+            await pg.keyboard.down('Space'); ctlJump = await pg.evaluate("G.input.down('jump')"); await pg.keyboard.up('Space')
+            await pg.keyboard.press('KeyN'); c1 = await pg.evaluate(probe); await pg.keyboard.press('KeyN'); c2 = await pg.evaluate(probe)
+            control = ctlJump and c1['muted'] != c0['muted'] and c2['muted'] == c0['muted'] and c2['keys'] >= c0['keys'] + 3
+            await pg.focus('#accountCard [data-view=password] input[name=password]'); b0 = await pg.evaluate(probe)
+            await pg.keyboard.down('Space'); pwJump = await pg.evaluate("G.input.down('jump')"); await pg.keyboard.up('Space')
+            await pg.keyboard.type('nN'); await pg.keyboard.press('KeyN')
+            b1 = await pg.evaluate(probe); v = await pg.evaluate("document.querySelector('#accountCard [data-view=password] input[name=password]').value")
+            check('passwordTyping', control and not pwJump and b1['muted'] == b0['muted'] and b1['keys'] == b0['keys'] and v == 'secret nNn',
+                  {'control': control, 'ctlJump': ctlJump, 'c': [c0, c1, c2], 'pwJump': pwJump, 'before': b0, 'after': b1, 'value': v})
             await pg.keyboard.press('Tab'); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()
             check('escapeBack', c['view'] == 'email' and c['open'], c)
             await pg.focus('#acSendLink'); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()   # (in a text field the field keeps Escape)
