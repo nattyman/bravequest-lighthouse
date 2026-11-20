@@ -163,8 +163,6 @@ async def main():
             await ctx.add_cookies([fake.cookie(email)])
             await pg.evaluate("G.account.refresh()")
             await pg.wait_for_function("e => G.account.me&&G.account.me.email===e", arg=email, timeout=60000, polling=100)
-            try: await pg.wait_for_function("!G.slots.debug.log.length||G.slots.debug.log.slice(-1)[0].p!=='/v1/saves'||true", timeout=5000)
-            except Exception: pass
             await pg.wait_for_timeout(1200)
         async def st(pg): return await pg.evaluate(ST)
         async def click(pg, sel):
