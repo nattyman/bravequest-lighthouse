@@ -213,10 +213,6 @@ const ICON={
 
 const $=id=>document.getElementById(id);
 const el=(tag,cls,text)=>{ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; };
-/* core.js keeps keys typed into text fields away from the game; it knows type=text fields, so a password field (which must
-   be type=password for the browser to mask it and offer saved passwords) answers that check as a text field too */
-const TYPING='textarea,input[type=text],input:not([type])';
-function asText(input){ const m=input.matches; input.matches=function(s){ return s===TYPING||m.call(this,s); }; }
 const EMAIL_RE=/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 const NAME_RE=/^[A-Za-z0-9 _'\-]{3,16}$/;
 const cleanEmail=t=>String(t||'').trim();
@@ -239,7 +235,7 @@ function buildCard(){
   const btn=(host,text,cls,id,type)=>{ const b=el('button',cls||'btn',text); b.type=type||'button'; if(id)b.id=id; host.appendChild(b); return b; };
   const linkB=(host,text,id)=>btn(host,text,'ac-link',id);
   const field=(labelText,icon,input,eye)=>{ const l=el('label',null,labelText); const f=el('span','ac-field'+(eye?' eye':'')); f.innerHTML=icon; f.appendChild(input); l.appendChild(f); return {label:l,wrap:f}; };
-  const textInput=(o)=>{ const i=el('input'); i.type=o.type||'text'; for(const k in o.attrs||{})i.setAttribute(k,o.attrs[k]); if(i.type==='password')asText(i); return i; };
+  const textInput=(o)=>{ const i=el('input'); i.type=o.type||'text'; for(const k in o.attrs||{})i.setAttribute(k,o.attrs[k]); return i; };   // core.js keeps typed keys from the game
   const eyeToggle=(wrap,input)=>{ const b=el('button','ac-eye'); b.type='button'; b.setAttribute('aria-label','Show password'); b.innerHTML=ICON.eye; wrap.appendChild(b);
     b.addEventListener('click',()=>{ const show=input.type==='password'; input.type=show?'text':'password'; b.innerHTML=show?ICON.eyeOff:ICON.eye;
       b.setAttribute('aria-label',show?'Hide password':'Show password'); b.setAttribute('aria-pressed',String(show)); }); return b; };
@@ -327,11 +323,15 @@ function buildCard(){
   let cur='email', from='title', opener=null, busy=false, chal=null, email='', reauthFor='', resendAt=0, tick=0, lastSent='';
   const BACK={email:'acGuest',password:'acPwBack',code:'acOther',linked:'acLinkedNo',account:'acBack',setpw:'acPwCancel',delete:'acDelBack',reauth:'acReBack'};
   const TITLE={email:'Sign in',password:'Sign in',code:'Check your email',account:'Your account',delete:'Delete account',reauth:'Sign in again'};
-  const tell=(t,bad)=>{ note.textContent=t||''; note.classList.toggle('bad',!!bad); };
+  /* the status line sits under the control it answers (the name field, the code, the buttons), not at the foot of the card */
+  const NOTE_AT={email:eTwo,password:pSign,code:cLbl,linked:lText,account:mForm,setpw:sFine,delete:dL,reauth:rText};
+  const noteAt=x=>{ if(x&&x.parentNode&&x.nextSibling!==note)x.after(note); };
+  const tell=(t,bad,at)=>{ note.textContent=t||''; note.classList.toggle('bad',!!bad); if(at)noteAt(at); };
   function focus(x){ if(!x||x.hidden||x.disabled)return; try{ x.focus({preventScroll:false}); }catch(_){} }
   const mobile=()=>!!G.isMobile;
   function show(v,o){
     o=o||{}; cur=v; for(const k in V)V[k].hidden=k!==v; card.scrollTop=0;
+    noteAt(NOTE_AT[v]);
     if(!o.keep)tell('');
     card.dataset.padBack=BACK[v];
     if(TITLE[v])h.textContent=v==='code'&&reauthFor?'Sign in again':TITLE[v];
@@ -394,7 +394,7 @@ function buildCard(){
   function afterSignIn(again){
     if(A.state!=='in'){ show('email'); tell(SAY.server,true); return; }
     if(reauthFor){ const v=reauthFor; reauthFor=''; mName.value=A.me.name||''; show(v==='delete'?'delete':'setpw'); tell('Thanks. Now '+(v==='delete'?'type DELETE to confirm.':'choose your password.')); return; }
-    mName.value=A.me.name||''; show('account'); tell(again?'Signed in again.':'You’re signed in. Welcome, keeper.');
+    mName.value=A.me.name||''; show('account'); tell(again?'Signed in again.':'You’re signed in. Welcome, keeper.',false,mWho);
   }
 
   /* send a link + code to an address */
@@ -451,8 +451,8 @@ function buildCard(){
       setMe(me); mName.value=me.name||''; tell(me.name?'Your keeper name is now '+me.name+'.':'Your keeper name is cleared.'); return; }
     tell(say(why(r),r),true); focus(mName); });
   mPw.addEventListener('click',()=>{ sCur.value=''; sNew.value=''; show('setpw'); });
-  mOut.addEventListener('click',async()=>{ const r=await run(()=>signOut(false)); if(r.ok){ show('email'); tell('You’re signed out. The game carries on as a guest.'); } else tell(say(r.why,{retry:r.wait}),true); });
-  mAll.addEventListener('click',async()=>{ const r=await run(()=>signOut(true)); if(r.ok){ show('email'); tell('You’re signed out on every device.'); } else tell(say(r.why,{retry:r.wait}),true); });
+  mOut.addEventListener('click',async()=>{ const r=await run(()=>signOut(false)); if(r.ok){ show('email'); tell('You’re signed out. The game carries on as a guest.'); } else tell(say(r.why,{retry:r.wait}),true,mAct); });
+  mAll.addEventListener('click',async()=>{ const r=await run(()=>signOut(true)); if(r.ok){ show('email'); tell('You’re signed out on every device.'); } else tell(say(r.why,{retry:r.wait}),true,mAct); });
   mDel.addEventListener('click',()=>{ dIn.value=''; show('delete'); });
   mBack.addEventListener('click',()=>close());
   S.addEventListener('submit',async e=>{ e.preventDefault(); if(busy||!A.me)return;
@@ -462,7 +462,7 @@ function buildCard(){
     const pw={new:nw}; if(has)pw.current=cu;
     const r=await run(()=>call('PUT','/v1/me',{password:pw}));
     if(r.ok){ sCur.value=''; sNew.value=''; const me=r.data&&r.data.me&&r.data.me.id?r.data.me:Object.assign({},A.me,{hasPassword:true}); setMe(me);
-      show('account'); tell(has?'Password changed. Other devices have been signed out.':'Password set. You can sign in with it from now on.'); return; }
+      show('account'); tell(has?'Password changed. Other devices have been signed out.':'Password set. You can sign in with it from now on.',false,mAct); return; }
     if(r.status===403&&r.error==='reauth'){ reauthFor='setpw'; show('reauth'); return; }
     const w=why(r); tell(say(w==='bad_login'?'bad_current':w,r),true); focus(w==='bad_login'?sCur:sNew); });
   sBack.addEventListener('click',()=>{ sCur.value=''; sNew.value=''; show('account'); });
