@@ -111,6 +111,14 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   like `'/v1/saves/2'`, fetch options plus `auth:false` (no sync code) and `timeout` (ms, default 15 s); a plain-object `body` is sent as JSON.
   With accounts on it adds `credentials:'include'` and `X-BQ-Client: 1`; unless signed in it adds `Authorization: Bearer <sync code>` when there
   is one; a `401 signed_out` while signed in turns the state to 'out'. With accounts off it is a plain call with the sync code.
+- Keepers' Board (js/board.js): `G.board = {open(from), close(), push(), state, debug}`. Every call goes through `G.account.fetch`. Signed in,
+  the board belongs to the account (no sync code needed; the keeper name is the account's, re-read with `G.account.refresh()` after a change;
+  nothing is uploaded while `G.slots.active()` is a test slot; a `404 no_save` waits for `cloud:saved` / `slots:saved` / `slots:active`).
+  With accounts on, a guest with no name is offered **Sign in** (`G.account.open('boardCard')`), also on a `403 account_needed`.
+  `account:in` / `account:out` / `account:me` re-read the name and the boards. `state.signedIn / needsAccount / testSlot` for tests.
+- Typing: core.js stops game keys in every field that takes typed text (`textarea`, `input` of type text/password/email/search/tel/url/number
+  or no type, `contenteditable`); a module never needs its own guard for that.
+- `privacy.html` (repo root, static, no scripts) is copied into the release build; the account card links to it.
 - The Keeper's Record (js/record.js; spec RECORD.md): `G.record = {state, MILESTONES, BOSSES, play(), ms(id), split(id), best(id), boss(id),
   completion() → {done,total,pct,parts}, summary(), fmt(s), attempt, debug}` — play time, counters, milestone times and boss attempts, in the save
   (persist key `record`). Badges and rank (js/badges.js): `G.badges = {list() → [{id,cat,name,desc,hint,hidden,got,shown}], has(id), count(), total(),
