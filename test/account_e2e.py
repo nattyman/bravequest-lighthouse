@@ -356,6 +356,8 @@ async def main():
             ck = [k for k in await ctx.cookies(API) if k['name'] == 'bq_s']
             check('signOut', c['state'] == 'out' and c['view'] == 'email' and 'signed out' in c['note'] and so['b'] == {} and so['cookie'] and not ck and c['ev'][-1]['n'] == 'account:out' and c['links'] == ['Sign in', 'Sign in']
                   and c['tags'] == ['acSendLink'], dict(c, so=so))
+            r = await shot('lastused')
+            check('lastUsedFitsPhone', fits(r), r)
             n = await pg.evaluate("async () => (await G.account.fetch('/v1/echo')).status")
             e = fake.reqs(path='/v1/echo')[-1]
             check('fetchSignedOut', n == 200 and e['auth'] == 'Bearer ' + SYNC and e['x'] == '1' and not e['cookie'], e)

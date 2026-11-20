@@ -334,7 +334,7 @@ function buildCard(){
     o=o||{}; cur=v; for(const k in V)V[k].hidden=k!==v; card.scrollTop=0;
     if(!o.keep)tell('');
     card.dataset.padBack=BACK[v];
-    if(TITLE[v])h.textContent=TITLE[v];
+    if(TITLE[v])h.textContent=v==='code'&&reauthFor?'Sign in again':TITLE[v];
     render();
     if(o.focus!==false)focus(o.focus||defaultFocus(v));
   }
