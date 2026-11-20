@@ -255,7 +255,8 @@ async def main():
             await pg.evaluate("window.dispatchEvent(new Event('online'))")
             await until(lambda: fake.slots[aid][1]['at'] == v['la']); await pg.wait_for_timeout(800)
             v = await pg.evaluate("G.slots.debug.view(1)")
-            check('uploadOnReconnect', not v['unsent'] and fake.slots[aid][1]['at'] == v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at']})
+            dbg = await pg.evaluate("JSON.stringify({m:G.slots.debug.meta().s[1],log:G.slots.debug.log.slice(-8)})")
+            check('uploadOnReconnect', not v['unsent'] and fake.slots[aid][1]['at'] == v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at'], 'v': {k: v[k] for k in ('unsent', 'sa', 'conflict')}, 'dbg': dbg})
         await step('offline', offline, ('newGame',))
 
         async def testTools():
@@ -285,9 +286,9 @@ async def main():
             await signin(W['ctx'], pg, A); s = await st(pg)
             check('noSecondOffer', not s['card'] and s['tcont'] and 'Last played: Save 1 (test) ·' in s['info'], s)
             await click(pg, '#continue'); await settle(pg); s = await st(pg)
-            used = [r for r in s['rows'] if not r['empty']]
-            check('slotList', s['card'] == 'list' and len(s['rows']) == 10 and [r['n'] for r in used] == [1, 2] and 'Test' in used[1]['text'] and 'Test' not in used[0]['text']
-                  and used[1]['cur'] and 'Last played' in used[1]['text'] and 'complete' in used[0]['text'] and s['pad'] == 'slotsBack' and 'of 10 save slots used' in await pg.evaluate("document.querySelector('#slotsCard .sl-fine').textContent"), s['rows'][:3])
+            used = [dict(r, text=r['text'].lower()) for r in s['rows'] if not r['empty']]
+            check('slotList', s['card'] == 'list' and len(s['rows']) == 10 and [r['n'] for r in used] == [1, 2] and 'test' in used[1]['text'].replace('(test)', '') and 'test' not in used[0]['text']
+                  and used[1]['cur'] and 'last played' in used[1]['text'] and 'complete' in used[0]['text'] and s['pad'] == 'slotsBack' and 'of 10 save slots used' in await pg.evaluate("document.querySelector('#slotsCard .sl-fine').textContent"), s['rows'][:3])
             # keyboard: Escape closes, Continue reopens
             await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); s2 = await st(pg)
             check('escapeCloses', not s2['card'] and s2['titleShown'], s2['card'])
@@ -343,7 +344,7 @@ async def main():
             s = await st(pg)
             check('reloadSignedIn', s['acc'] == 'in' and s['tcont'] and 'Last played: Lantern run' in s['info'], s['info'])
             await click(pg, '#continue'); await settle(pg); s = await st(pg)
-            check('lastPlayedMarked', s['rows'][0]['cur'] and 'Last played' in s['rows'][0]['text'], s['rows'][0])
+            check('lastPlayedMarked', s['rows'][0]['cur'] and 'last played' in s['rows'][0]['text'].lower(), s['rows'][0])
             await row(pg, 2); await pg.wait_for_timeout(300)
             check('keepCard2', (await st(pg))['card'] == 'keep', 'shown')
             await click(pg, '#slKeepAccount'); await play(pg); s = await st(pg)
@@ -412,4 +413,4 @@ async def main():
     if skipped: print('skipped: ' + ', '.join(skipped))
     sys.exit(1 if fails else 0)
 
-asyncio.run(main())
+if __name__ == "__main__": asyncio.run(main())

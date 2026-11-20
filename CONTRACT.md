@@ -112,7 +112,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   With accounts on it adds `credentials:'include'` and `X-BQ-Client: 1`; unless signed in it adds `Authorization: Bearer <sync code>` when there
   is one; a `401 signed_out` while signed in turns the state to 'out'. With accounts off it is a plain call with the sync code.
 - Save slots (js/slots.js, after account.js; spec ACCOUNTS.md): `G.slots = {on, list(), active() → {slot,test,name}|null, open(from), close(), use(slot),
-  newGame(), rename(slot,name), remove(slot), flush(), debug}`; events `slots:change {}`, `slots:active {slot,test}`. Only while signed in: a game
+  newGame(), rename(slot,name), remove(slot), flush(), debug}`; events `slots:change {}`, `slots:active {slot,test}` (also on the move into a test copy; slot 0 = local test slot), `slots:uploaded {slot,test}` (after every successful upload or claim). Only while signed in: a game
   begun signed in saves into an account slot (localStorage `bq-save-s<n>-<account id>`, uploaded with PUT /v1/saves/<n>); signed out or with
   accounts off every hook answers null/false and saves are exactly as before. `active()` is null for a guest game; `test` is true for a test slot
   and for the local test fallback (`slot:0`). Anything that must not run from a test save (the board, pings) checks `G.testSaves` (set for test

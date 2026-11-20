@@ -28,7 +28,9 @@
    API: G.slots = { on, list(), active() -> {slot,test,name}|null, open(from), close(), use(slot), newGame(),
                     rename(slot,name), remove(slot), flush(), debug }
         hooks for flow.js / cloud.js / record.js / badges.js: saveKey(), readKey(), owner(), title(), intercept(kind), beginning()
-   Events: 'slots:change' {}   'slots:active' {slot, test}
+   Events: 'slots:change' {}   'slots:active' {slot, test} (the slot this game saves into, also on the move into a test copy; slot 0 = the
+           local test slot)   'slots:uploaded' {slot, test} (a slot reached the account: every successful upload, and a claim)
+           'slots:saved' {slot, at} (the same moment, with the save's time)
    ========================================================================= */
 (function(){
 'use strict';
@@ -194,7 +196,7 @@ async function put(n){
   finally{ U.busy=false; U.inflight=null; }
   if(acct()===id){
     if(r.ok){ m.sent=d.at; m.srv={at:d.at,objective:body.objective,rec,updated:Date.now()}; if(m.pend){ m.name=m.pend; m.pend=''; }
-      if(r.data&&r.data.test)m.test=true; saveMeta(id); emit('slots:saved',{slot:n,at:d.at}); emit('slots:change'); }
+      if(r.data&&r.data.test)m.test=true; saveMeta(id); emit('slots:saved',{slot:n,at:d.at}); emit('slots:uploaded',{slot:n,test:!!m.test}); emit('slots:change'); }
     else if(r.status===409&&r.error==='stale'){
       const at=+(r.data&&r.data.at)||0; m.srv=Object.assign({objective:'',rec:null},m.srv||{},{at}); if(at===d.at)m.sent=d.at;
       saveMeta(id); emit('slots:change');
@@ -309,33 +311,33 @@ function buildCard(){
   sheet.appendChild(el('span','eyebrow','Brave Quest · Lighthouse'));
   const h=el('h2'); h.id='slotsTitle'; sheet.appendChild(h);
   const V={};
-  const view=id=>{ const v=el('div','sl-view'); v.dataset.view=id; sheet.appendChild(v); V[id]=v; return v; };
+  const section=id=>{ const v=el('div','sl-view'); v.dataset.view=id; sheet.appendChild(v); V[id]=v; return v; };
   const btn=(host,text,cls,id,type)=>{ const b=el('button',cls||'btn',text); b.type=type||'button'; if(id)b.id=id; host.appendChild(b); return b; };
 
-  const L=view('list');
+  const L=section('list');
   const lWho=el('p','sl-fine'); const list=el('ol','sl-list'); list.setAttribute('aria-label','Save slots');
   const lAct=el('div','actions'); const lNew=btn(lAct,'New game','btn','slotsNew'); const lBack=btn(lAct,'Back','btn ghost','slotsBack');
   L.append(lWho,list,lAct);
 
-  const R=view('rename');
+  const R=section('rename');
   const rForm=el('form'); rForm.noValidate=true;
   const rLbl=el('label',null,'Name for this save'); const rIn=el('input'); rIn.type='text'; rIn.maxLength=NAME_MAX; rIn.autocomplete='off'; rIn.spellcheck=false; rIn.name='slotname'; rLbl.appendChild(rIn);
   const rAct=el('div','actions'); const rSave=btn(rAct,'Save name','btn','slRenameSave','submit'); const rBack=btn(rAct,'Cancel','btn ghost','slRenameCancel');
   rForm.append(rLbl,el('p','sl-fine','Up to 24 letters, numbers or spaces.'),rAct); R.append(rForm);
 
-  const D=view('delete');
+  const D=section('delete');
   const dText=el('p'); const dBox=el('div','sl-box');
   const dAct=el('div','actions'); const dGo=btn(dAct,'Delete this save','btn sl-danger','slDelGo'); const dBack=btn(dAct,'Keep it','btn ghost','slDelNo');
   D.append(dText,dBox,dAct);
 
-  const K=view('keep');
+  const K=section('keep');
   const kText=el('p'); const kTwo=el('div','sl-two');
   const kDev=btn(kTwo,'','sl-choice','slKeepDevice'), kAcc=btn(kTwo,'','sl-choice','slKeepAccount');
   const kFine=el('p','sl-fine','The one you don’t choose is replaced. Not sure? Pick the one with the later time.');
   const kAct=el('div','actions'); const kBack=btn(kAct,'Back','btn ghost','slKeepBack');
   K.append(kText,kTwo,kFine,kAct);
 
-  const C=view('claim');
+  const C=section('claim');
   const cText=el('p','','This device has a guest save. Bring it into your account to keep it in a save slot and carry on from any device you sign in on.');
   const cBox=el('div','sl-box');
   const cAct=el('div','actions'); const cGo=btn(cAct,'Bring this save into your account','btn','slClaimGo'); const cNo=btn(cAct,'Not now','btn ghost','slClaimNo');
@@ -542,10 +544,12 @@ async function claim(){
     if(r.status===409&&r.error==='stale'){ await refresh(); return {ok:false,why:'server'}; }   // the slot was taken meanwhile
     if(!r.ok)return {ok:false,why:offline(r)?'offline':r.error};
     Object.assign(slotMeta(id,n),{name:'',test:false,srv:{at:g.at,objective:body.objective,rec:body.rec,updated:Date.now()},sent:g.at,pend:'',big:false});
+    emit('slots:uploaded',{slot:n,test:false});
   }else{
     Object.assign(slotMeta(id,n),{name:'',test:false,srv:null,sent:0,pend:'',big:false});
   }
   lsSet(cacheKey(id,n),raw); saveMeta(id);
+  if(code)emit('slots:uploaded',{slot:n,test:false});
   if(code&&S.forget)S.forget();                // the code is retired: forget it here, guest sync stops
   lsSet(guestKey(),null);                      // the save has moved into the account
   offered(true); setActive(id,n);
