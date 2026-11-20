@@ -303,7 +303,10 @@ STEPS=[
    const DG={loss:[],legs:[]}; let ctx='start'; G.on('moths:lost',e=>{ if(DG.loss.length>=40)return; const pp=G.player.pos; const cr=G.monsters.list.filter(m=>m.alive&&!m.dying&&m.kind==='brineling').map(m=>[m.state,+m.pos.distanceTo(pp).toFixed(1)]).sort((a,b)=>a[1]-b[1]).slice(0,3);
      DG.loss.push([ctx,+G.time.toFixed(1),e.n,e.by||'',gust.phase,JSON.stringify(cr),T.where().slice(1,4).join(',')]); });
    for(const [x,z] of [[60,-72],[60,-62],[60,-54],[60,-46],[60,-42]]){
-     ctx='wait'+z; let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
+     // (a crab that comes for the swarm while you wait for the gap is fought off, as a player would: stood still with it eating at
+     // arm's length, the wait for a quiet gap cost up to 8 moths, and the door seal further on needs 20)
+     const threat=()=>G.monsters.list.some(m=>m.alive&&!m.dying&&!/idle|return|wander/.test(m.state)&&m.pos.distanceTo(G.player.pos)<9&&G.cave.toLocal(m.pos).y>G.cave.water()-.9);
+     ctx='wait'+z; let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ if(threat()){ ctx='waitFight'+z; const f=T.fight({r:9,max:300,threats:true,each:seen}); w+=Math.max(1,f.steps); ctx='wait'+z; continue; } G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
      if(w>=900)return {ok:false,why:'no quiet gap between gusts in 30 s',gust:{phase:gust.phase,next:gust.next},at:T.where()};
      ctx='fight'+z; const ff=T.fight({r:9,max:600,threats:true}); ctx='walk'+z; const ww=T.walk([[x,z]],{local:true,each:seen}); DG.legs.push([z,w,ff.steps,ff.left,ww.steps,T.swarm()]); if(z===-54&&!window._gustShot){ window._gustShot=1; } }
    ctx='end'; const sw=T.swarm(); killedInGust=gust.lost-gl0;
@@ -399,10 +402,13 @@ STEPS=[
    const DG={pre:{st:T.states(),jar:G.moths.jar.count,bait:+G.moths.baitLeft.toFixed(1),freed:+G.moths.jar.freedLeft.toFixed(1),shut:G.items.lantern.shut,carried:G.items.lantern.carried,lost:G.moths.lost,mode:G.state.mode,time:+G.time.toFixed(1),dark:+(G.atmo.dark||0).toFixed(2),tide:+G.tide.level.toFixed(2),
      at:T.where(),blight:[+b.pos.x.toFixed(1),+b.pos.y.toFixed(1),+b.pos.z.toFixed(1)],mons:G.monsters.list.filter(m=>m.alive&&m.pos.distanceTo(G.player.pos)<25).map(m=>m.kind+':'+m.state+':'+m.pos.distanceTo(G.player.pos).toFixed(1))},tl:[]};
    const lostEv=[]; G.on('moths:lost',e=>lostEv.push([+G.time.toFixed(2),e.n,e.by||'',e.snatch?1:0]));
-   const u=T.use(/Release/); for(let i=0;i<6;i++){ T.wait(1/6); DG.tl.push(JSON.stringify(T.states())); } const sw=T.swarm(); DG.lostEv=lostEv.slice(0,20); DG.lost1=G.moths.lost; DG.freed1=+G.moths.jar.freedLeft.toFixed(1);
-   let t=0; const fights=[]; while(!b.cured&&t<3600){ const f=T.fight({r:14,max:300}); if(f.steps)fights.push(f.steps); T.walk([[b.pos.x+2.5,b.pos.z]],{max:300}); T.wait(1); t+=30+f.steps; }
+   // (T.use answers 'NOPE:<what was offered>' when another prompt or none is up, a hollow on top of you, say: then the jar stayed
+   // corked, and the check went on fighting for a minute and a half with nothing to feed the pool. Uncork it again, like a player would)
+   const uses=[]; let u=T.use(/Release/); uses.push(u); for(let i=0;i<6;i++){ T.wait(1/6); DG.tl.push(JSON.stringify(T.states())); } const sw=T.swarm(); DG.lostEv=lostEv.slice(0,20); DG.lost1=G.moths.lost; DG.freed1=+G.moths.jar.freedLeft.toFixed(1);
+   let t=0; const fights=[]; while(!b.cured&&t<3600){ const f=T.fight({r:14,max:300}); if(f.steps)fights.push(f.steps); T.walk([[b.pos.x+2.5,b.pos.z]],{max:300});
+     if(G.moths.jar.count>0&&uses.length<5){ u=T.use(/Release/); uses.push(u); } T.wait(1); t+=30+f.steps; }
    T.wait(3);
-   return {ok:/Release/.test(u)&&b.cured,lab,released:sw,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm(),DIAG:DG}; })()"""),
+   return {ok:/Release/.test(u)&&b.cured,lab,uses,released:sw,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm(),DIAG:DG}; })()"""),
  ("shot:blight-cured",None),
  # ---------------------------------------------------------------- camera random walk + draw calls
  ("cameraWalk", r"""(()=>{ const D=G.cave._debug, O=G.cave.origin, cv=document.querySelector('canvas'); const rng=G.U.rng(4242);
