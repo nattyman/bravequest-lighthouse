@@ -1,6 +1,6 @@
 # Builds the public beta: a self-contained dist/ folder (and a zip of it for itch.io) that makes no request to
 # any CDN. Everything the page loads is in the folder: the game modules, Three.js from vendor/, the fonts from
-# vendor/fonts/, the music, the sound effects and the icons (icons/, manifest.webmanifest).
+# vendor/fonts/, the music, the sound effects, the icons (icons/, manifest.webmanifest) and the privacy page (privacy.html).
 #
 #   python3 test/build_release.py --api https://bravequest-api.saturnsites.com
 #   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://nattyman.github.io/bravequest-lighthouse-3d/
@@ -101,11 +101,16 @@ for d in ('audio', 'sfx', 'icons', os.path.join('vendor', 'fonts')):
     for dp, _, fs in os.walk(os.path.join(root, d)):
         files += [os.path.relpath(os.path.join(dp, f), root) for f in fs if not f.startswith('.')]
 files.append('manifest.webmanifest')
+files.append('privacy.html')   # the privacy page the account card links to (static: no scripts, nothing from other sites)
 files.append(os.path.join('vendor', 'three', 'LICENSE'))   # Three.js is MIT: its licence text travels with it
 for f in files:
     src = os.path.join(root, f)
     if not os.path.exists(src): fail('missing file: ' + f)
     dst = os.path.join(out, f); os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.copy2(src, dst)
+
+# 6b. the privacy page must stay self-contained, like the game
+pv = open(os.path.join(root, 'privacy.html'), encoding='utf-8').read()
+if re.search(r'<script|(?:src|href)="(?:https?:)?//', pv, re.I): fail('privacy.html must have no scripts and load nothing from other sites')
 
 # 7. the zip for itch.io (index.html at the top level)
 zname = os.path.join(os.path.dirname(out), 'bravequest-lighthouse-' + re.sub(r'[^A-Za-z0-9._-]', '-', a.version) + '.zip')

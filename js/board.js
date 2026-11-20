@@ -17,7 +17,14 @@
    - Card: tabs Act 1 / Full game / Bosses / Fewest deaths / Most complete, Everyone / Crew, your row highlighted and
      your place shown even outside the list. Each board is fetched when its tab is opened and kept for a minute.
      Bosses list only the ones this save has beaten (their names would spoil the rest).
-   - localStorage 'bq-board': {code, name, crew, asked} (the name and crew of the sync code they were set under).
+   - localStorage 'bq-board': {code, name, crew, asked} (the name and crew of the sync code, or 'a:<account id>', they were set under).
+   - With Keeper Accounts on (js/account.js; Spec: ACCOUNTS.md, section 6d) every call goes through G.account.fetch (with accounts
+     off that is the same plain call with the sync code, so guests and builds without accounts see no change). Signed in, the
+     board belongs to the account: no sync code is needed, the keeper name is the account's (the service keeps the two in step;
+     after a change the account is re-read), uploads carry the session cookie, and nothing is uploaded while the active save slot
+     (G.slots, if present) is a test save. Signed out with accounts on, a guest with no name is told a new keeper name needs an
+     account (Sign in opens the account card; the service's 403 account_needed says the same); a guest who has a name keeps it.
+     Signing in or out re-reads the name and the boards.
    API: G.board = { open(from), close(), state, push(), debug }
    ========================================================================= */
 (function(){
@@ -38,6 +45,17 @@ const el=(tag,cls,text)=>{ const e=document.createElement(tag); if(cls)e.classNa
 const sync=()=>G.cloud&&G.cloud.sync||null;
 const code=()=>{ try{ const s=sync(); return s&&s.code?String(s.code()||'').replace(/[^0-9A-Z]/gi,'').toUpperCase():''; }catch(_){ return ''; } };
 const syncAvailable=()=>{ try{ const s=sync(); return !!(s&&s.available); }catch(_){ return false; } };
+/* Keeper Accounts (account.js loads after this file: always look it up when needed) */
+const acct=()=>G.account||null;
+const accountsOn=()=>{ const a=acct(); return !!(a&&a.on); };
+const signedIn=()=>{ const a=acct(); return !!(a&&a.on&&a.state==='in'&&a.me&&a.me.id); };
+const acctMe=()=>signedIn()?acct().me:null;
+/* whose board entry this device speaks for: the account when signed in, else the sync code ('' = nobody) */
+const owner=()=>{ const m=acctMe(); return m?'a:'+String(m.id):code(); };
+/* the active save slot is a test save (G.slots comes with save slots; without it there is no such thing) */
+const testSlot=()=>{ if(!signedIn()||!G.slots||typeof G.slots.active!=='function')return false; try{ const a=G.slots.active(); return !!(a&&a.test); }catch(_){ return false; } };
+/* a guest in a build with accounts: a NEW keeper name needs an account */
+const needsAccount=()=>accountsOn()&&!signedIn()&&!mine().name;
 const fmt=s=>{ try{ if(G.record&&G.record.fmt)return G.record.fmt(s); }catch(_){}
   s=Math.max(0,Math.floor(+s||0)); const h=Math.floor(s/3600), m=Math.floor(s/60)%60, x=s%60, p=n=>(n<10?'0':'')+n; return h?h+':'+p(m)+':'+p(x):m+':'+p(x); };
 const build=()=>String((G.beta&&G.beta.version)||VERSION||'dev').slice(0,40);
@@ -47,26 +65,34 @@ function load(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'{}'); return
 let st=Object.assign({code:'',name:'',crew:'',asked:0},load());
 function save(){ try{ localStorage.setItem(LS,JSON.stringify({code:st.code,name:st.name,crew:st.crew,asked:st.asked?1:0})); }catch(_){} }
 /* the name and crew are the sync code's: another code (joined, turned off and on) starts with neither until the server says */
-function mine(){ const c=code(); if(st.code!==c){ st.code=c; st.name=''; st.crew=''; R.fetched=''; save(); } return st; }
-const joined=()=>!!(code()&&mine().name);
+function mine(){ const c=owner(); if(st.code!==c){ st.code=c; const m=acctMe(); st.name=m&&m.name?String(m.name):''; st.crew=''; R.fetched=''; save(); } return st; }
+const joined=()=>!!(owner()&&mine().name);
 
 /* ---- the save service ---- */
 async function call(method,path,body,o){
-  o=o||{}; const h={}, k=o.auth===false?'':code();
-  if(k)h.Authorization='Bearer '+k;
-  if(body)h['Content-Type']='application/json';
-  const ac=typeof AbortController==='function'&&!o.keepalive?new AbortController():null;
-  const t=ac?setTimeout(()=>ac.abort(),TIMEOUT):0;
+  o=o||{}; const A=acct();
   let r;
-  try{ r=await fetch(API+path,{method,headers:h,body:body?JSON.stringify(body):undefined,cache:'no-store',keepalive:!!o.keepalive,signal:ac?ac.signal:undefined}); }
-  catch(_){ clearTimeout(t); return {ok:false,status:0,error:'offline'}; }
-  clearTimeout(t);
+  if(A&&typeof A.fetch==='function'){
+    /* the one way to the service: cookie + X-BQ-Client with accounts on, the sync code as Bearer unless signed in */
+    try{ r=await A.fetch(path,{method,body:body||undefined,keepalive:!!o.keepalive,auth:o.auth,timeout:TIMEOUT}); }
+    catch(_){ return {ok:false,status:0,error:'offline'}; }
+  }else{
+    /* account.js missing (a build without it): the same call by hand */
+    const h={}, k=o.auth===false?'':code();
+    if(k)h.Authorization='Bearer '+k;
+    if(body)h['Content-Type']='application/json';
+    const ac=typeof AbortController==='function'&&!o.keepalive?new AbortController():null;
+    const t=ac?setTimeout(()=>ac.abort(),TIMEOUT):0;
+    try{ r=await fetch(API+path,{method,headers:h,body:body?JSON.stringify(body):undefined,cache:'no-store',keepalive:!!o.keepalive,signal:ac?ac.signal:undefined}); }
+    catch(_){ clearTimeout(t); return {ok:false,status:0,error:'offline'}; }
+    clearTimeout(t);
+  }
   let d=null; try{ d=await r.json(); }catch(_){}
   return {ok:r.ok,status:r.status,error:(d&&d.error)||(r.ok?'':'http_'+r.status),data:d,retry:Math.max(1,+(r.headers.get('Retry-After')||0)||60)};
 }
 
 /* ---- uploads ---- */
-const R={gen:0,log:[],busy:null,dirty:false,lastTry:0,blockedUntil:0,waitSave:false,timer:0,sessionSent:false,bad:false,uploads:0,last:null,fetched:''};
+const R={gen:0,idGen:0,log:[],busy:null,dirty:false,lastTry:0,blockedUntil:0,waitSave:false,timer:0,sessionSent:false,bad:false,uploads:0,last:null,fetched:''};
 function payload(){
   const Rec=G.record; if(!Rec||!Rec.summary)return null;
   let s; try{ s=Rec.summary(); }catch(_){ return null; }
@@ -85,20 +111,22 @@ function payload(){
   try{ if(G.badges){ badges=int(G.badges.count(),0,1000); rank=int(G.badges.rank().i,0,20); } }catch(_){}
   return {build:build(),play,deaths:int(s.deaths,0,1e6),pct:int(s.pct,0,100),days:int(s.days,0,10000),badges,rank,splits,bosses};
 }
-function canUpload(){ return !quiet()&&!!code()&&!!(G.record&&G.record.summary)&&!R.bad&&(!dnt()||joined()); }
+function canUpload(){ return !quiet()&&!!owner()&&!testSlot()&&!!(G.record&&G.record.summary)&&!R.bad&&(!dnt()||joined()); }
 function arm(ms){ if(R.timer)return; R.timer=setTimeout(()=>{ R.timer=0; if(R.dirty)push(); },Math.max(50,ms)); }
 /* one PUT; extra = {name} / {crew} for the player's own changes */
 async function send(extra,keepalive){
   const body=payload(); if(!body)return {ok:false,status:0,error:'no_record'};
   if(extra)Object.assign(body,extra);
-  R.lastTry=Date.now(); const gen=R.gen;
+  R.lastTry=Date.now(); const gen=R.gen, id=R.idGen;
   const p=call('PUT','/v1/record',body,{keepalive});
   R.busy=p; let r;
   try{ r=await p; }finally{ R.busy=null; }
   R.last={status:r.status,error:r.error,named:!!(extra&&'name' in extra),at:Date.now()};
-  R.log.push({at:R.last.at,status:r.status,error:r.error,extra:!!extra}); if(R.log.length>40)R.log.shift();
+  R.log.push({at:R.last.at,status:r.status,error:r.error,extra:!!extra,acct:signedIn()}); if(R.log.length>40)R.log.shift();
+  if(id!==R.idGen){ R.dirty=true; return r; }      // signed in or out meanwhile (a 401 signed_out does that): the answer was for someone else
   if(r.ok){ R.uploads++; R.sessionSent=true; R.waitSave=false; if(R.gen===gen)R.dirty=false; else arm(GAP-(Date.now()-R.lastTry)); G.emit('board:uploaded',{status:r.status}); }
-  else if(r.status===404&&r.error==='no_save'){ R.waitSave=true; R.dirty=true; }   // the save hasn't reached the service yet: after the next cloud save
+  else if(r.status===404&&r.error==='no_save'){ R.waitSave=true; R.dirty=true; }   // the save (an account: a save slot that isn't a test) hasn't reached the service yet: after the next one
+  else if(r.status===403&&r.error==='account_needed'){ if(!extra)R.bad=true; }      // only a name change can get this; never retried
   else if(r.status===429){ R.blockedUntil=Date.now()+r.retry*1000; R.dirty=true; if(!extra)arm(r.retry*1000); }
   else if(r.status===401||r.status===404||r.status===400&&!extra){ R.bad=true; }   // a code or data the service won't take, or a service without boards: stop trying
   else if(!extra){ R.dirty=true; arm(GAP); }                                 // unreachable: quietly again in a minute
@@ -108,7 +136,7 @@ async function send(extra,keepalive){
 /* a routine upload: throttled, silent */
 function push(o){
   o=o||{};
-  if(!canUpload())return Promise.resolve(false);
+  if(!canUpload()){ if(testSlot()&&!quiet())R.dirty=true; return Promise.resolve(false); }   // a test slot: sent once a real slot is active (slots:active)
   R.dirty=true; R.gen++;
   if(R.busy)return R.busy.then(()=>false,()=>false);
   const now=Date.now();
@@ -122,7 +150,19 @@ function wire(){
   G.on('record:milestone',e=>{ if(fresh(e))push(); });
   G.on('record:boss',e=>{ if(e&&e.win)push(); });
   G.on('badge:earned',e=>{ if(fresh(e))push(); });
-  G.on('cloud:saved',()=>{ if(R.waitSave||!R.sessionSent||R.dirty){ R.waitSave=false; push(); } });
+  const saved=()=>{ if(R.waitSave||!R.sessionSent||R.dirty){ R.waitSave=false; push(); } };
+  G.on('cloud:saved',saved);                     // a guest save, or (save slots) a slot upload, reached the service
+  G.on('slots:saved',saved); G.on('slots:uploaded',saved);
+  G.on('slots:active',()=>{ if(!testSlot()&&(R.waitSave||R.dirty))saved(); });
+  /* signed in or out: another owner, another name, other boards */
+  const swap=e=>{
+    R.idGen++; R.bad=false; R.waitSave=false; R.sessionSent=false; R.fetched=''; R.blockedUntil=0;
+    clearTimeout(R.timer); R.timer=0; dropCache(); mine();
+    if(e&&e.me&&signedIn()){ st.name=String(e.me.name||''); if(st.name)st.asked=1; save(); }
+    if(ui)ui.reload();
+  };
+  G.on('account:in',swap); G.on('account:out',swap);
+  G.on('account:me',e=>{ if(!signedIn())return; mine(); const n=String(e&&e.me&&e.me.name||''); if(n!==st.name){ st.name=n; if(n)st.asked=1; save(); dropCache(); if(ui)ui.reload(); } });
   const away=()=>{ if(R.dirty&&canUpload()&&!R.busy&&Date.now()>=R.blockedUntil)push({now:true,keepalive:true}); };
   document.addEventListener('visibilitychange',()=>{ if(document.hidden)away(); });
   window.addEventListener('pagehide',away);
@@ -135,32 +175,38 @@ function cleanCrew(t){ return String(t||'').toUpperCase().replace(/[^0-9A-Z]/g,'
 /* PUT with the change; a missing save is uploaded first and the change tried once more */
 async function change(extra){
   if(quiet())return {ok:false,why:'quiet'};
-  if(!code())return {ok:false,why:'no_code'};
+  if(!owner())return {ok:false,why:accountsOn()?'account_needed':'no_code'};
+  if(signedIn()&&testSlot())return {ok:false,why:'test_slot'};
   if(R.busy){ try{ await R.busy; }catch(_){} }
   if(Date.now()<R.blockedUntil)return {ok:false,why:'rate',wait:Math.ceil((R.blockedUntil-Date.now())/1000)};
+  const id=R.idGen;
   let r=await send(extra);
-  if(!r.ok&&r.status===404&&r.error==='no_save'&&G.cloud&&G.cloud.flush){ try{ await G.cloud.flush(); }catch(_){} r=await send(extra); }
+  if(!r.ok&&r.status===404&&r.error==='no_save'&&G.cloud&&G.cloud.flush&&id===R.idGen){ try{ await G.cloud.flush(); }catch(_){} r=await send(extra); }
+  if(id!==R.idGen)return {ok:false,why:'swapped'};
   if(r.ok){ const d=r.data||{}; mine();
     if('name' in extra)st.name=typeof d.name==='string'?d.name:cleanName(extra.name);
     if('crew' in extra)st.crew=cleanCrew(extra.crew);
-    st.asked=1; save(); return {ok:true}; }
-  const why=r.status===0?'offline':r.status===429?'rate':r.error==='name_taken'?'name_taken':r.error==='name_invalid'?'name_invalid'
+    st.asked=1; save();
+    if('name' in extra&&signedIn()){ try{ const p=acct().refresh(); if(p&&p.catch)p.catch(()=>{}); }catch(_){} }   // the account card shows the same name
+    return {ok:true}; }
+  const why=r.status===0?'offline':r.status===429?'rate':r.error==='account_needed'?'account_needed':r.error==='name_taken'?'name_taken':r.error==='name_invalid'?'name_invalid'
     :r.error==='no_save'?'no_save':r.error==='no_record'?'no_save':r.status===400&&'crew' in extra?'crew_invalid':r.status===401?'bad_key':'unavailable';
   return {ok:false,why,wait:r.status===429?r.retry:0};
 }
 /* what the server holds for this code (the name may have been chosen on another device) */
 async function fetchMine(){
-  const c=code(); if(!c||R.fetched===c)return;
+  const c=owner(); if(!c||R.fetched===c)return;
   const r=await call('GET','/v1/record');
-  if(code()!==c)return;
-  if(r.ok&&r.data){ mine(); st.name=String(r.data.name||''); st.crew=String(r.data.crew||''); if(st.name)st.asked=1; save(); R.fetched=c; }
-  else if(r.status===404){ mine(); st.name=''; st.crew=''; save(); R.fetched=c; }
+  if(owner()!==c)return;
+  const m=acctMe();          // signed in, the account's keeper name is the one that counts
+  if(r.ok&&r.data){ mine(); st.name=m?String(m.name||''):String(r.data.name||''); st.crew=String(r.data.crew||''); if(st.name)st.asked=1; save(); R.fetched=c; }
+  else if(r.status===404){ mine(); st.name=m?String(m.name||''):''; st.crew=''; save(); R.fetched=c; }
 }
 
 /* ---- boards ---- */
 const cache={};
 async function board(b,crew){
-  const k=b+'|'+(crew||'')+'|'+code(), c=cache[k];
+  const k=b+'|'+(crew||'')+'|'+owner(), c=cache[k];
   if(c&&Date.now()-c.at<CACHE)return c.r;
   const r=await call('GET','/v1/board?b='+encodeURIComponent(b)+(crew?'&crew='+encodeURIComponent(crew):'')+'&limit='+LIMIT);
   if(r.ok)cache[k]={at:Date.now(),r};
@@ -257,6 +303,7 @@ function buildCard(){
   input.setAttribute('autocapitalize','words'); input.placeholder='3 to 16 letters or numbers'; lbl.appendChild(input);
   const jAct=el('div','actions');
   const joinB=el('button','btn','Join the board'); joinB.type='submit'; joinB.id='boardJoin'; jAct.appendChild(joinB);
+  const signInB=btn(jAct,'Sign in',false,'boardSignIn');     // accounts on, a guest: a new keeper name needs an account
   const notNow=btn(jAct,'Not now',true,'boardNotNow');
   const leaveB=btn(jAct,'Leave the board',true,'boardLeave');
   form.append(lbl,jAct);
@@ -296,12 +343,13 @@ function buildCard(){
   const act=el('div','actions'); const back=btn(act,'Back',true,'boardBack'); body.appendChild(act);
   document.body.appendChild(card);
 
-  let from='title', opener=null, view='board', tab='act1', boss='', crewView=false, editing=false, busy=false, req=0;
+  let from='title', opener=null, view='board', tab='act1', boss='', crewView=false, editing=false, busy=false, req=0, needAcct=false, stale=false;
   const V={join:J,board:B,crew:C};
   const sentText=()=>dnt()
     ?(joined()?'Your browser asks sites not to track it. You joined the board, so your times are sent with your name; leave the board to stop that.'
       :'Your browser asks sites not to track it, so nothing is sent from this device unless you join the board.')
     :(joined()?'Your times, deaths, completion, badge count and rank are sent with your name.'
+      :signedIn()?'Signed in, your times are kept with your account, without a name unless you join; unnamed times are never shown on the board.'
       :'With sync on, your times are sent without a name unless you join; unnamed times are never shown on the board.');
   function focus(x){ if(!x||x.hidden||x.disabled)return; try{ x.focus({preventScroll:false}); }catch(_){} }
   function show(v,keepNote){
@@ -311,21 +359,27 @@ function buildCard(){
     render();
   }
   function render(){
-    const c=code(), s=mine(), on=syncAvailable();
+    const c=owner(), s=mine(), inAcct=signedIn(), on=inAcct||syncAvailable();
+    const guestAcc=accountsOn()&&!inAcct, ask=guestAcc&&(!s.name||needAcct);     // a guest who would need an account for a new name
     back.hidden=view==='join'&&!editing;
     if(view==='join'){
       jIntro1.textContent='The Keepers’ Board lists the beta’s fastest and most thorough keepers: Act 1 and full-game times, boss fights, fewest deaths, most complete.';
-      jIntro2.textContent='Pick a keeper name to appear on it. The name belongs to your sync code: the code is your password, the name is yours while you keep it.';
-      jSync.hidden=!!c; jSync.textContent=on?'The board needs sync turned on, so your times have a save to belong to. Joining turns it on.'
+      jIntro2.textContent=inAcct?'Pick a keeper name to appear on it. It’s your account’s keeper name: the same one is on your account card, on every device you sign in on.'
+        :ask?(s.name?'A new keeper name needs an account. Sign in, or make an account with just your email address, to choose another. You can keep the name you have.'
+          :'A keeper name needs an account. Sign in, or make an account with just your email address, and pick your name. You can still look at the board as a guest.')
+        :'Pick a keeper name to appear on it. The name belongs to your sync code: the code is your password, the name is yours while you keep it.';
+      jSync.hidden=!!c||guestAcc; jSync.textContent=on?'The board needs sync turned on, so your times have a save to belong to. Joining turns it on.'
         :'Sync isn’t available in this browser, so you can look at the board but not join it.';
       joinB.textContent=editing?'Save name':c?'Join the board':'Turn on sync and join';
-      joinB.hidden=!on&&!c; lbl.hidden=!on&&!c;
+      joinB.hidden=!on&&!c||guestAcc&&!s.name; lbl.hidden=joinB.hidden;
+      signInB.hidden=!ask;
       notNow.hidden=editing; leaveB.hidden=!editing||!s.name;
       jSent.textContent=sentText();
     }else if(view==='board'){
       who.innerHTML='';
       if(s.name&&c){ who.append('You’re on the board as '); who.appendChild(el('b',null,s.name)); who.append(s.crew?' in crew '+s.crew+'.':'.'); }
-      else who.textContent=c?'You’re not on the board. Your own times are shown under each list.':'Sync is off on this device, so you’re not on the board. Your own times are shown under each list.';
+      else who.textContent=guestAcc?'You’re not on the board: a keeper name needs an account. Your own times are shown under each list.'
+        :c?'You’re not on the board. Your own times are shown under each list.':'Sync is off on this device, so you’re not on the board. Your own times are shown under each list.';
       nameB.textContent=s.name&&c?'Change name':'Join the board';
       nameB.hidden=!c&&!on;
       crewOpen.hidden=!c;
@@ -343,7 +397,7 @@ function buildCard(){
       cHave.hidden=!s.crew; cHave.innerHTML=''; if(s.crew){ cHave.append('Your crew: '); cCode.textContent=s.crew; cHave.appendChild(cCode); cHave.append('. Share the code with your friends.'); }
       cLbl.hidden=!!s.crew; cJoin.hidden=!!s.crew; cMake.hidden=!!s.crew; cLeave.hidden=!s.crew;
     }
-    for(const x of [joinB,notNow,leaveB,nameB,crewOpen,cJoin,cMake,cLeave,input,cInput])x.disabled=busy;
+    for(const x of [joinB,signInB,notNow,leaveB,nameB,crewOpen,cJoin,cMake,cLeave,input,cInput])x.disabled=busy;
   }
   const curBoard=()=>tab==='boss'?(boss?'boss:'+boss:''):tab;
   async function fetchNow(){
@@ -378,10 +432,13 @@ function buildCard(){
     if(you&&you.pos!=null){ yours.textContent=''; return; }
     const v=you&&you.value!=null?you.value:localValue(b);
     if(v==null){ yours.textContent=b==='deaths'?'This board counts finished full games only.':''; return; }
-    yours.textContent='Yours: '+valueText(b,v)+(joined()?(crewView?' (not in this crew’s list)':' (not listed yet)'):' · not on the board'+(code()?'':' (sync is off)'));
+    yours.textContent='Yours: '+valueText(b,v)+(joined()?(crewView?' (not in this crew’s list)':' (not listed yet)'):' · not on the board'+(owner()||accountsOn()?'':' (sync is off)'));
   }
   function why(w,wait){
-    return w==='name_taken'?'That name is taken. Try another.'
+    return w==='account_needed'?'A new keeper name needs an account. Sign in to choose one.'
+      :w==='test_slot'?'You’re playing a test save, and test saves stay off the board. Change your keeper name on your account card, or play one of your other saves.'
+      :w==='no_save'&&signedIn()?'Your save hasn’t reached your account yet. Play a minute or two, then try again.'
+      :w==='name_taken'?'That name is taken. Try another.'
       :w==='name_invalid'?'That name isn’t allowed. Use 3 to 16 letters, numbers, spaces, - _ or \', and nothing rude.'
       :w==='crew_invalid'?'A crew code is 4 to 12 letters or numbers.'
       :w==='rate'?'Too many tries in a short time. Wait '+(wait>90?Math.ceil(wait/60)+' minutes':(wait||60)+' seconds')+' and try again.'
@@ -391,9 +448,10 @@ function buildCard(){
       :w==='bad_key'?'The save service didn’t accept this device’s sync code.'
       :'Couldn’t reach the board just now. Check your connection and try again in a minute.';
   }
-  async function run(fn){ busy=true; note.textContent='One moment…'; render(); let r; try{ r=await fn(); }catch(_){ r={ok:false,why:'offline'}; } busy=false; render(); return r; }
+  async function run(fn){ busy=true; note.textContent='One moment…'; render(); let r; try{ r=await fn(); }catch(_){ r={ok:false,why:'offline'}; } busy=false; render(); if(stale)setTimeout(reload,0); return r; }
   async function ensureCode(){
-    if(code())return {ok:true};
+    if(owner())return {ok:true};             // signed in, or a sync code already
+    if(accountsOn())return {ok:false,why:'account_needed'};
     const S=sync(); if(!S||!S.available)return {ok:false,why:'no_code'};
     const r=await S.enable();
     if(r&&r.ok)return {ok:true,turned:true};
@@ -404,11 +462,15 @@ function buildCard(){
     const n=cleanName(input.value);
     if(!NAME_RE.test(n)||!/[A-Za-z0-9]/.test(n)){ note.textContent=n.length<3||n.length>16?'A keeper name is 3 to 16 characters.':why('name_invalid'); focus(input); return; }
     if(editing&&n===mine().name){ editing=false; show('board'); fetchNow(); return; }
-    const r=await run(async()=>{ const s=await ensureCode(); if(!s.ok)return s; R.fetched=code(); return change({name:n}); });
-    if(r.ok){ const was=editing; editing=false; dropCache(); show('board',true); note.textContent=(was?'Your name is now ':'Welcome to the board, ')+mine().name+'.'; fetchNow(); focus(tabBtn[tab]); }
+    const r=await run(async()=>{ const s=await ensureCode(); if(!s.ok)return s; R.fetched=owner(); return change({name:n}); });
+    if(r.ok){ const was=editing; editing=false; needAcct=false; dropCache(); show('board',true); note.textContent=(was?'Your name is now ':'Welcome to the board, ')+mine().name+'.'; fetchNow(); focus(tabBtn[tab]); }
+    else if(r.why==='swapped'){ reload(); }
+    else if(r.why==='account_needed'){ needAcct=true; render(); note.textContent=why(r.why); focus(signInB); }
     else { note.textContent=why(r.why,r.wait); focus(input); }
   });
-  notNow.addEventListener('click',()=>{ st.asked=1; save(); show('board'); fetchNow(); focus(tabBtn[tab]); });
+  notNow.addEventListener('click',()=>{ st.asked=1; save(); needAcct=false; show('board'); fetchNow(); focus(tabBtn[tab]); });
+  /* the account card opens over this one and comes back to it; signing in there refreshes this card (reload) */
+  signInB.addEventListener('click',()=>{ const A=acct(); if(busy||!A||!A.open)return; st.asked=1; save(); stale=true; A.open('boardCard',signInB); });
   leaveB.addEventListener('click',async()=>{
     const r=await run(()=>change({name:''}));
     if(r.ok){ editing=false; dropCache(); show('board',true); note.textContent='You’ve left the board. Your times are still kept in your save.'; fetchNow(); focus(nameB); }
@@ -417,7 +479,8 @@ function buildCard(){
   for(const t of TABS)tabBtn[t.id].addEventListener('click',()=>{ tab=t.id; note.textContent=''; render(); fetchNow(); });
   allB.addEventListener('click',()=>{ crewView=false; render(); fetchNow(); });
   crewB.addEventListener('click',()=>{ crewView=true; render(); fetchNow(); });
-  nameB.addEventListener('click',()=>{ editing=!!mine().name&&!!code(); input.value=mine().name||''; show('join'); focus(G.isMobile?joinB:input); });
+  nameB.addEventListener('click',()=>{ editing=!!mine().name&&!!owner(); needAcct=false; input.value=mine().name||''; show('join');
+    focus(!signInB.hidden&&joinB.hidden?signInB:G.isMobile?joinB:input); });
   crewOpen.addEventListener('click',()=>{ cInput.value=''; show('crew'); focus(mine().crew?cLeave:(G.isMobile?cMake:cInput)); });
   async function setCrew(c,made){
     const r=await run(()=>change({crew:c}));
@@ -434,17 +497,39 @@ function buildCard(){
   document.addEventListener('keydown',e=>{ if(!card.hidden&&e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); (back.hidden?notNow:back).click(); } },true);
   G.on('mode',e=>{ if(e&&e.mode==='play'&&!card.hidden){ card.hidden=true; } });   // the game resumed underneath (a key the pause menu answers): just go
 
-  function close(){ card.hidden=true; const f=$(from); if(f&&(from!=='pause'||G.state.mode==='paused'))f.hidden=false; if(opener)focus(opener); }
+  function close(){ card.hidden=true; stale=false; const f=$(from); if(f&&(from!=='pause'||G.state.mode==='paused'))f.hidden=false; if(opener)focus(opener); }
   async function open(f,b){
-    from=f||'title'; opener=b||null; editing=false; busy=false;
+    from=f||'title'; opener=b||null; editing=false; busy=false; needAcct=false; stale=false;
     const fc=$(from); if(fc)fc.hidden=true; card.hidden=false;
-    const first=!st.asked||mine().code!==code();
-    if(code()&&R.fetched!==code()){ note.textContent='One moment…'; for(const k in V)V[k].hidden=true; back.hidden=false;
+    const first=!st.asked||mine().code!==owner();
+    if(owner()&&R.fetched!==owner()){ note.textContent='One moment…'; for(const k in V)V[k].hidden=true; back.hidden=false;
       await fetchMine(); if(card.hidden)return; note.textContent=''; }
-    if(!mine().name&&!st.asked&&first){ input.value=''; show('join'); focus(G.isMobile?joinB:input); }
+    if(!mine().name&&!st.asked&&first){ input.value=''; show('join'); focus(!signInB.hidden&&joinB.hidden?signInB:G.isMobile?joinB:input); }
     else { show('board'); fetchNow(); focus(tabBtn[tab]); }
   }
-  return {open,close,get view(){ return card.hidden?'':view; }, get tab(){ return tab; }, get boss(){ return boss; }, get crewView(){ return crewView; },
+  /* signed in or out (or the keeper name changed on the account card): read the name again, then show what is true now.
+     While the card is hidden (the account card is over it) this waits until it shows again. */
+  let reloading=false;
+  async function reload(){
+    if(card.hidden){ stale=true; return; }
+    if(busy||reloading){ stale=true; return; }
+    reloading=true; stale=false;
+    try{
+      if(owner()&&R.fetched!==owner()){ await fetchMine(); if(card.hidden){ stale=true; return; } }
+      const s=mine();
+      if(signedIn()||s.name)needAcct=false;
+      if(view==='join'){
+        if(editing&&!s.name)editing=false;
+        input.value=editing?s.name:(signedIn()?input.value:'');
+        if(!editing&&joined()){ show('board',true); fetchNow(); return; }
+        show('join',true); return;
+      }
+      if(view==='crew'){ render(); return; }
+      render(); fetchNow();
+    }finally{ reloading=false; if(stale&&!card.hidden)setTimeout(reload,0); }
+  }
+  try{ new MutationObserver(()=>{ if(!card.hidden&&stale)reload(); }).observe(card,{attributes:true,attributeFilter:['hidden']}); }catch(_){}
+  return {open,close,reload,get view(){ return card.hidden?'':view; }, get tab(){ return tab; }, get boss(){ return boss; }, get crewView(){ return crewView; },
     tabTo(t,b){ tab=t; if(b)boss=b; if(view!=='board')show('board'); else render(); return fetchNow(); }};
 }
 function dropCache(){ for(const k in cache)delete cache[k]; }
@@ -474,6 +559,7 @@ G.on('ready',place); window.addEventListener('load',place);
 G.board={
   open, close, push:()=>push({now:false}),
   get state(){ const s=mine(); return {enabled:!quiet(),name:s.name,crew:s.crew,asked:!!s.asked,joined:joined(),code:!!code(),dnt:dnt(),
+    signedIn:signedIn(),needsAccount:needsAccount(),testSlot:testSlot(),
     view:ui?ui.view:'',tab:ui?ui.tab:'',boss:ui?ui.boss:'',crewView:ui?ui.crewView:false,
     uploads:R.uploads,dirty:R.dirty,waitSave:R.waitSave,blocked:Math.max(0,R.blockedUntil-Date.now()),bad:R.bad,last:R.last?Object.assign({},R.last):null,log:R.log.slice(-6),timer:!!R.timer,sinceTry:R.lastTry?Date.now()-R.lastTry:null}; },
   debug:{
@@ -481,7 +567,7 @@ G.board={
     cache(ms){ if(ms!=null)CACHE=Math.max(0,+ms||0); return CACHE; },
     payload, beaten, dropCache, canUpload, get log(){ return R.log.slice(); }, get timer(){ return !!R.timer; },
     tab:(t,b)=>ui?ui.tabTo(t,b):null,
-    reset(){ clearTimeout(R.timer); Object.assign(R,{gen:0,log:[],busy:null,dirty:false,lastTry:0,blockedUntil:0,waitSave:false,timer:0,sessionSent:false,bad:false,uploads:0,last:null,fetched:''});
+    reset(){ clearTimeout(R.timer); Object.assign(R,{gen:0,idGen:R.idGen+1,log:[],busy:null,dirty:false,lastTry:0,blockedUntil:0,waitSave:false,timer:0,sessionSent:false,bad:false,uploads:0,last:null,fetched:''});
       st={code:'',name:'',crew:'',asked:0}; try{ localStorage.removeItem(LS); }catch(_){} dropCache(); return true; }
   }
 };

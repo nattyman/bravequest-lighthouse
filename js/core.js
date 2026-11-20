@@ -241,9 +241,11 @@ const joy={on:false,id:null,ox:0,oy:0,x:0,y:0}, look={id:null,x:0,y:0};
 const actionsOf=code=>Object.keys(BIND).filter(a=>BIND[a].includes(code));
 function press(code){ if(!held.has(code)){held.add(code);actionsOf(code).forEach(a=>pressed.add(a));} }
 function release(code){ if(held.has(code)){held.delete(code);actionsOf(code).forEach(a=>released.add(a));} }
-/* typing in a text field (the beta's feedback box, a sync code) is never game input. core.js loads first, so these
-   capture listeners run before every other module's key handler and stop the key there; the browser still types it. */
-const typing=e=>{ const t=e.target; return !!(t&&t.matches&&t.matches('textarea,input[type=text],input:not([type])')); };
+/* typing in a text field (the beta's feedback box, a sync code, an email address or password) is never game input. core.js
+   loads first, so these capture listeners run before every other module's key handler and stop the key there; the browser
+   still types it. Every input type that takes typed text counts (checkboxes, ranges and buttons don't). */
+const TYPING='textarea,input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=tel],input[type=url],input[type=number],[contenteditable]:not([contenteditable=false])';
+const typing=e=>{ const t=e.target; return !!(t&&t.matches&&t.matches(TYPING)); };
 addEventListener('keydown',e=>{ if(typing(e))e.stopImmediatePropagation(); },true);
 addEventListener('keyup',e=>{ if(typing(e))e.stopImmediatePropagation(); },true);
 addEventListener('keydown',e=>{ if(e.repeat)return;
