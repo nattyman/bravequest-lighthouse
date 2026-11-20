@@ -173,7 +173,8 @@ async def main():
             try: await asyncio.wait_for(fn(), BUDGET)
             except Exception as e: check(name, False, {'error': (type(e).__name__ + ' ' + str(e))[:300]})
             if len(fails) > n0 and name not in fails: fails.append(name)
-        CARD = """() => { const c=document.getElementById('accountCard'); if(!c)return {open:false,exists:false};
+        CARD = """() => { const c=document.getElementById('accountCard'); if(!c)return {open:false,exists:false,state:G.account.state,me:G.account.me,ev:window.__acEv.slice(),
+              links:[...document.querySelectorAll('[data-account-link]')].map(x=>x.textContent+(x.hidden?' (hidden)':''))};
             const vis=e=>!!e&&!e.hidden&&e.getClientRects().length>0;
             const v=c.querySelector('[data-view]:not([hidden])');
             return {open:!c.hidden, exists:true, view:v?v.dataset.view:'', title:c.querySelector('h2').textContent, note:c.querySelector('.savenote').textContent,
