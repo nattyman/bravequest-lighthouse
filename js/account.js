@@ -17,7 +17,7 @@
      Keepers' Board. Placed once the page has loaded and again on 'ready' / 'load', so any script order works.
    API: G.account = { on, available, state:'off'|'checking'|'out'|'in', me, ready, can(group), fetch(path,opts),
                       open(from), close(), signOut(everywhere), refresh(), debug }
-   Events: 'account:in' {me, fresh}  'account:out' {}  'account:me' {me} (me changed while signed in)
+   Events: 'account:in' {me, fresh}  'account:out' {why, id}  'account:me' {me} (me changed while signed in)
    ========================================================================= */
 (function(){
 'use strict';
@@ -93,17 +93,19 @@ function setIn(me,fresh){
   if(was!=='in')G.emit('account:in',{me,fresh:!!fresh}); else G.emit('account:me',{me});
 }
 function setMe(me){ if(A.state!=='in'||!me)return; A.me=me; place(); G.emit('account:me',{me}); }
+/* why: 'expired' (the service no longer knows the session: signed out elsewhere, ended or disabled by the studio), 'signout',
+   'deleted', 'off' (the service switched accounts off); id: the account that was signed in */
 function setOut(why){
-  const was=A.state; A.me=null; A.state='out'; place();
-  if(was==='in'){ G.emit('account:out',{}); if(ui)ui.signedOut(why); }
+  const was=A.state, id=A.me&&A.me.id?String(A.me.id):''; A.me=null; A.state='out'; place();
+  if(was==='in'){ G.emit('account:out',{why:why||'',id}); if(ui)ui.signedOut(why); }
 }
 const done=()=>{ if(readyDone){ const f=readyDone; readyDone=null; f(A.state); } };
 async function refresh(){
   if(!ON)return A.state;
   const r=await call('GET','/v1/me',null,{timeout:FIRST_TIMEOUT});
   if(r.ok&&r.data&&r.data.id){ A.svcOff=false; setIn(r.data,false); }
-  else if(r.status===401){ A.svcOff=false; A.offline=false; setOut(); }
-  else if(r.status===503){ A.svcOff=true; setOut(); }            // the service has accounts switched off: no button
+  else if(r.status===401){ A.svcOff=false; A.offline=false; setOut('expired'); }
+  else if(r.status===503){ A.svcOff=true; setOut('off'); }            // the service has accounts switched off: no button
   else { A.offline=true; if(A.state==='checking'){ A.state='out'; place(); } }   // unreachable: a signed-in player stays in
   return A.state;
 }
@@ -111,7 +113,7 @@ const can=g=>!!(A.state==='in'&&A.me&&Array.isArray(A.me.tools)&&A.me.tools.inde
 async function signOut(everywhere){
   if(!ON)return {ok:false,why:'off'};
   const r=await call('POST','/v1/auth/signout',everywhere?{everywhere:true}:{});
-  if(r.ok||r.status===401){ setOut(); return {ok:true}; }
+  if(r.ok||r.status===401){ setOut('signout'); return {ok:true}; }
   return {ok:false,why:why(r),wait:r.retry};
 }
 

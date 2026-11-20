@@ -185,7 +185,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `record:boss` / `record:change` / `record:newgame` | {id,win,time,hurt,draughts,tries} / {} / {run} | record |
 | `badge:earned` / `rank:up` | {id, name, restored} / {i, name} | badges |
 | `journal:tab` / `welcome:open` / `welcome:close` | {tab} / {} / {} | progression (the Journal's tabs, the welcome-back card) |
-| `account:in` / `account:out` / `account:me` | {me, fresh} / {} / {me} | account (fresh: signed in on this page load, not a restored session; `account:me`: `me` changed while signed in) |
+| `account:in` / `account:out` / `account:me` | {me, fresh} / {why, id} / {me} | account (fresh: signed in on this page load, not a restored session; `why`: 'expired' (the service ended the session), 'signout', 'deleted', 'off'; `id`: the account that was signed in; `account:me`: `me` changed while signed in) |
 
 ## Module briefs (who owns what)
 **world.js** — `G.world.height/walkable/landmarks` (synchronous), terrain mesh(es) with vertex colours (cel-shaded), sea (animated), sky dome (dusk gradient + moon + stars faint), fog, sea stacks, forest (instanced trunks/canopies; colliders for trunks), moor heath + wildflowers, local grass that follows `G.focus` for density, rocks, ruined hamlet, standing stones, stone walls, keeper's cottage + shed with warm windows, the cliff-path ramp, the Resisting Tree, path rendering, mushrooms visuals, atmosphere application (reads `G.atmo`), hemi/sun colours. Registers colliders for trees, rocks, buildings.

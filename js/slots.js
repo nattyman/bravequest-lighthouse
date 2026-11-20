@@ -601,22 +601,33 @@ function newGame(){ if(!ON||!acct())return false; const u=ensureUI(); if(firstFr
 async function use(n){ if(!ON||!acct()||!(n>=1&&n<=MAX))return false; const u=ensureUI(); if(!u.view)u.open('title'); await u.chooseSlot(n); return true; }
 
 /* ---- signing in and out ---- */
+const EXPIRED='You’ve been signed out of your account, so this device plays as a guest now. Sign in again to carry on with your account’s saves.';
+/* a deleted account: drop its slot copies, list details and other per-account keys ('…-<account id>') and its entries in the shared maps */
+function forget(id){
+  try{ const ks=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.slice(-(id.length+1))==='-'+id)ks.push(k); } ks.forEach(k=>localStorage.removeItem(k)); }catch(_){}
+  for(const k of [ACTIVE,CLAIM]){ const m=jget(k); if(id in m){ delete m[id]; lsSet(k,Object.keys(m).length?JSON.stringify(m):null); } }
+  delete MS[id];
+}
 if(ON){
   G.on('account:in',()=>{
     if(G.state.mode==='title'&&!sess){ G.flow&&G.flow.refreshTitle&&G.flow.refreshTitle(); }
     try{ sessionStorage.removeItem(NOTE); }catch(_){}
     refresh().then(()=>{ if(G.state.mode==='title'&&!sess&&G.flow)G.flow.refreshTitle(); maybeOffer(); });
   });
-  G.on('account:out',()=>{
+  G.on('account:out',e=>{
+    const why=e&&e.why||'', gone=e&&e.id||'';
+    if(why==='deleted'&&gone)forget(gone);          // the account is gone: nothing of it is kept on this device
     if(sess){
       // the slot being played stays on this device (it uploads the next time this account signs in here); back to the title
-      try{ if(['play','paused','ending','dead'].includes(G.state.mode)&&G.flow)G.flow.writeSave(); }catch(_){}
+      if(why!=='deleted')try{ if(['play','paused','ending','dead'].includes(G.state.mode)&&G.flow)G.flow.writeSave(); }catch(_){}
       clearTimeout(U.timer); U.timer=0; sess=null;
-      try{ sessionStorage.setItem(NOTE,'You’re signed out. Your account’s saves stay in your account; Continue here is this device’s guest game.'); }catch(_){}
+      try{ sessionStorage.setItem(NOTE,why==='expired'?EXPIRED:'You’re signed out. Your account’s saves stay in your account; Continue here is this device’s guest game.'); }catch(_){}
       setTimeout(()=>location.reload(),400);
       return;
     }
     if(ui&&ui.view)ui.close();
+    // ended by the service (signed out elsewhere, or the studio ended or switched off the account): say so on the title
+    if(why==='expired'){ try{ sessionStorage.setItem(NOTE,EXPIRED); }catch(_){} }
     if(G.state.mode==='title'&&G.flow)G.flow.refreshTitle();
   });
   G.on('save:written',()=>{ if(target())schedule(); });
