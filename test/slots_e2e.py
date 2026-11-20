@@ -387,10 +387,14 @@ async def main():
             pg = await page(ctx); await load(pg)
             await signin(ctx, pg, B); await card(pg, 'claim'); s = await st(pg)
             check('claimOfferCode', s['card'] == 'claim' and 'sync code' in await pg.evaluate("document.querySelector('#slotsCard [data-view=claim] .sl-box').innerText"), s['card'])
+            n0 = len(fake.log)
             await click(pg, '#slClaimGo'); await settle(pg); await pg.wait_for_timeout(800); s = await st(pg)
             bid = fake.accounts[B]['id']; cl = fake.reqs('POST', '/v1/saves/claim')
             check('claimWithCode', cl and cl[-1]['b'] == {'code': CODE} and cl[-1]['cookie'] and CODE not in fake.guest and 1 in fake.slots[bid] and s['code'] is None and s['guest'] is None
                   and s['card'] == 'list' and 'slot 1' in s['note'] and not s['rows'][0]['empty'] and 'Coded guest game' in s['rows'][0]['text'], dict(note=s['note'], code=s['code'], row=s['rows'][0]))
+            await pg.wait_for_timeout(1500); s = await st(pg); v = await pg.evaluate("G.slots.debug.view(1)")
+            # the account's copy is the same save (same time): it counts as sent, so no "not sent" flag and no needless upload
+            check('claimedCountsAsSent', not v['unsent'] and 'not sent' not in s['rows'][0]['text'] and not fake.reqs('PUT', '/v1/saves/1', since=n0), dict(puts=len(fake.reqs('PUT', '/v1/saves/1', since=n0)), v={k: v[k] for k in ('unsent', 'la', 'sa')}, row=s['rows'][0]['text']))
             await ctx.close()
         await step('claimCode', claimCode, ('setup1',))
 

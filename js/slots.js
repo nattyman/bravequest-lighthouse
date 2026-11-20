@@ -156,6 +156,7 @@ async function refresh(){
     m.srv={at:+s.at||0,objective:String(s.objective||''),rec:s.rec||null,updated:s.updated||0};
     if(!m.pend)m.name=String(s.name||'');
     m.test=!!s.test||(!!m.test&&!m.sent);                      // the account's flag (sticky there); a test copy not sent yet stays test
+    if((m.sent||0)<m.srv.at){ const d=parse(lsGet(cacheKey(id,n))); if(d&&+d.at===m.srv.at)m.sent=d.at; }   // the account holds this very save (e.g. just claimed): it is sent
   }
   for(let n=1;n<=MAX;n++){
     if(seen.has(n))continue;
