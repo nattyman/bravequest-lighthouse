@@ -102,6 +102,9 @@ class Fake:
             out = {'b': q.get('b', ['act1'])[0], 'crew': '', 'rows': rows}
             if owner: out['you'] = you
             return await send(200, out)
+        if path == '/v1/saves' and rq.method == 'GET':   # slots.js reads the slot list when an account signs in
+            if not sess: return await send(401, {'error': 'signed_out'})
+            return await send(200, {'max': 10, 'slots': []})
         self.other.append(rq.method + ' ' + path); await send(404, {'error': 'not_found'})
 
 async def main():
