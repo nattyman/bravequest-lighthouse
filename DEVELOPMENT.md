@@ -136,7 +136,8 @@ python3 test/build_release.py --api https://<save service> --version 0.9.0-beta.
   `BQ_CONFIG` (the Claude artifacts, `dev.html`) none of that runs.
 - The save service lives in `server/` (its own README: endpoints, tests, Coolify deploy). Its tests run in the
   `server` workflow; the game side is `test/beta_e2e.py` against a fake of the service.
-- The beta's own page is GitHub Pages, https://nattyman.github.io/bravequest-lighthouse/. The `pages` workflow
+- The beta's own page is GitHub Pages, served at https://bravequest.numinexstudio.com/ (the save service is at
+  https://bravequest-api.numinexstudio.com; its older saturnsites.com address still answers). The `pages` workflow
   rebuilds and publishes it on every push to `main`, so merging a pull request updates the public beta. The
   itch.io upload is still by hand, and still Heath's call.
 

@@ -145,7 +145,7 @@ IPv6 clients are counted per /64.
 `ALLOWED_ORIGINS` entries are either exact origins or contain one `*`:
 
 ```
-ALLOWED_ORIGINS=https://nattyman.github.io,https://*.itch.zone,http://localhost:*
+ALLOWED_ORIGINS=https://bravequest.numinexstudio.com,https://nattyman.github.io,https://*.itch.zone,http://localhost:*
 ```
 
 - `https://*.itch.zone`: the `*` is exactly one subdomain label.
@@ -408,7 +408,7 @@ Behind a Cloudflare Tunnel, add a public
 hostname to the tunnel for the service and send it to Coolify's proxy, `http://localhost:80`;
 in Coolify give the app that same hostname as its domain.
 
-For the public beta: `ALLOWED_ORIGINS=https://nattyman.github.io,https://*.itch.zone`
+For the public beta: `ALLOWED_ORIGINS=https://bravequest.numinexstudio.com,https://nattyman.github.io,https://*.itch.zone`
 (GitHub Pages, and the frame itch.io serves browser games from).
 
 ## Reading what comes in

@@ -2,8 +2,8 @@
 # any CDN. Everything the page loads is in the folder: the game modules, Three.js from vendor/, the fonts from
 # vendor/fonts/, the music, the sound effects, the icons (icons/, manifest.webmanifest) and the privacy page (privacy.html).
 #
-#   python3 test/build_release.py --api https://bravequest-api.saturnsites.com
-#   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://nattyman.github.io/bravequest-lighthouse-3d/
+#   python3 test/build_release.py --api https://bravequest-api.numinexstudio.com
+#   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://bravequest.numinexstudio.com/
 #
 # --api      the Lighthouse save service (server/). Turns on Sync devices, Send feedback and the progress pings
 #            (js/cloud.js, js/beta.js). Leave it out for a build with none of those.
