@@ -367,6 +367,7 @@ async def main():
             ctx = await context(); pg = await page(ctx)
             # device 1's storage is not shared with a new context, so copy A's cached slots in, then sign in as C
             store = await W['pg'].evaluate("JSON.stringify(Object.fromEntries(Object.keys(localStorage).map(k=>[k,localStorage.getItem(k)])))")
+            await W['ctx'].close()   # device 1 is done: one game page at a time (a second one can stall loading on a small runner)
             await ctx.add_init_script("if(!sessionStorage.getItem('copied')){ sessionStorage.setItem('copied','1'); const s=%s; for(const k in s)localStorage.setItem(k,s[k]); }" % store)
             await load(pg); W['pg2'] = pg; W['ctx2'] = ctx
             await signin(ctx, pg, C); s = await st(pg)
@@ -423,6 +424,7 @@ async def main():
             await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(1500); s = await st(pg)
             check('noFreeLocalTest', s['sess']['local'] and s['key'] == 'bq-save-test-v1' and 'No free save slot' in s['toast'] and not fake.reqs('PUT', since=n0)
                   and await pg.evaluate("!!localStorage.getItem('bq-save-test-v1')"), dict(sess=s['sess'], toast=s['toast']))
+            await ctx.close()
         await step('claimNoCode', claimNoCode, ('setup1',))
 
         # ---- device 4: the service ends the session (title says so); then the account is deleted (nothing of it left here) ----
