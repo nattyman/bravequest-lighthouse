@@ -32,7 +32,11 @@ jobs:
       # If the save service does not answer at the address the game is about to be built for, stop here:
       # the site that is already published stays up, instead of a new one whose cloud saves cannot connect.
       - name: Check the save service answers
-        run: curl -fsS --retry 3 --retry-delay 5 --max-time 20 "$BQ_API/health"
+        # Asked the way a browser asks: Cloudflare challenges a bare curl on this address (403), and players are browsers.
+        run: >-
+          curl -fsS --retry 3 --retry-delay 5 --max-time 20
+          -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+          "$BQ_API/health"
       - name: Build the beta
         run: >-
           python3 test/build_release.py

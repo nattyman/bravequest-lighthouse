@@ -107,8 +107,11 @@ if (!url) {
       const ids = await store._pool.query('SELECT 1 FROM saves WHERE id = $1 OR body LIKE $2', [key, `%${key}%`]);
       assert.equal(ids.rows.length, 0);
       // Records and boards over HTTP.
-      const name = 'Pg ' + Math.random().toString(36).slice(2, 10);
-      const crew = 'PG' + Math.random().toString(36).slice(2, 8).toUpperCase();
+      // Random, but from consonants only: random letters and digits now and then spelled a blocked word
+      // (digits count as their look-alike letters), and the name was refused with 400.
+      const pick = (n) => Array.from({ length: n }, () => 'bcdfghjklmnpqrtvwxz'[Math.floor(Math.random() * 19)]).join('');
+      const name = 'Pg ' + pick(8);
+      const crew = 'PG' + pick(6).toUpperCase();
       const rec = { name, crew, build: 'b', play: 2000, deaths: 1, pct: 30, badges: 2, rank: 1, days: 1,
         splits: { ashore: 10, gloaming: 1500 }, bosses: { stag: 30 } };
       const put2 = await fetch(`${s.url}/v1/record`, { method: 'PUT', headers: { Authorization: `Bearer ${key}` }, body: JSON.stringify(rec) });

@@ -54,7 +54,8 @@ async function seedAccount(s, { email = freshEmail(), at } = {}) {
 
 const lastAudit = async (s) => (await s.store.audit.list({ page: 1, per: 1 })).rows[0];
 const auditCount = async (s) => (await s.store.audit.list({ per: 1 })).total;
-const uname = () => `Kp${Math.random().toString(36).slice(2, 10)}`;
+// consonants only: random letters and digits can spell a blocked word (digits count as look-alike letters)
+const uname = () => `Kp${Array.from({ length: 8 }, () => 'bcdfghjklmnpqrtvwxz'[Math.floor(Math.random() * 19)]).join('')}`;
 
 // ---------------------------------------------------------------------------
 describe('admin guard', () => {
