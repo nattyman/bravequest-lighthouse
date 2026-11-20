@@ -8,6 +8,7 @@
 # --api      the Lighthouse save service (server/). Turns on Sync devices, Send feedback and the progress pings
 #            (js/cloud.js, js/beta.js). Leave it out for a build with none of those.
 # --version  shown small on the title and pause cards, and sent with feedback. The short git commit is appended.
+# --accounts turns on Keeper Accounts (sign in, the account card; js/account.js): BQ_CONFIG.accounts=true. Needs --api.
 # --direct   the game's own address (not the itch.io page), for link previews.
 # --out      output folder (default dist). The zip is written next to it.
 #
@@ -19,6 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--api', default='')
 ap.add_argument('--version', default='0.9.0-beta.1')
 ap.add_argument('--direct', default='')
+ap.add_argument('--accounts', action='store_true')
 ap.add_argument('--out', default=os.path.join(root, 'dist'))
 a = ap.parse_args()
 
@@ -52,6 +54,9 @@ if unlisted: fail('modules on disk that index.html does not load: ' + ', '.join(
 cfg = {'version': version, 'devtools': False}
 if a.api: cfg['api'] = a.api.rstrip('/')
 if a.direct: cfg['direct'] = a.direct
+if a.accounts:
+    if not a.api: fail('--accounts needs --api')
+    cfg['accounts'] = True
 first = '<script src="vendor/three/three.min.js"></script>'
 if first not in s: fail('could not find the Three.js script tag')
 s = s.replace(first, '<script>window.BQ_CONFIG=' + json.dumps(cfg) + ';</script>\n' + first, 1)
