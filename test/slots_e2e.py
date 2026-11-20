@@ -429,8 +429,8 @@ async def main():
         async def endedAndDeleted():
             E = 'e@example.com'
             ctx = await context(); pg = await page(ctx); await load(pg); W['pg4'] = pg
-            await signin(ctx, pg, E); eid = fake.accounts[E]['id']
             fake.put_slot(E, 1, guest_save('E game'))
+            await signin(ctx, pg, E); eid = fake.accounts[E]['id']
             await click(pg, '#continue'); await settle(pg); await row(pg, 1); await play(pg)
             await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(800)
             async with pg.expect_navigation(wait_until='domcontentloaded', timeout=90000):

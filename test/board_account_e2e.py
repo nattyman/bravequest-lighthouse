@@ -300,8 +300,10 @@ async def main():
             check('accountsOffBoardAsGuest', 'Sign in' not in links and not c['state']['needsAccount'] and 'Sign in' not in c['buttons'] and 'needs an account' not in c['text']
                   and 'Turn on sync and join' in c['buttons'] and c['input'], dict(c, links=links))
             # such a service refuses the account header and credentials on its guest routes (CORS): the board's calls are plain ones
-            bq = fake.reqs('GET', '/v1/board')[-1]
-            check('accountsOffPlainCalls', bq['x'] is None and not bq['cookie'], bq)
+            n0 = len(fake.reqs('GET', '/v1/board'))
+            await click(p3, 'Not now'); await settle(p3)
+            bq = fake.reqs('GET', '/v1/board')[n0:]
+            check('accountsOffPlainCalls', bq and bq[-1]['x'] is None and not bq[-1]['cookie'], bq[-1:])
             fake.off = False
             await c3.close()
         await step('accountsOff', accountsOff)

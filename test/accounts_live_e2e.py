@@ -83,15 +83,14 @@ def check(name, ok, info=None):
 async def main():
     os.makedirs(SHOTS, exist_ok=True)
     async with async_playwright() as p:
-        b = None
         async def context():   # one browser per device: a second WebGL page in the same browser never finishes loading here
-            bb = None
+            bb = await p.chromium.launch(executable_path=CHROME, args=ARGS)
             ctx = await bb.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=1)
             await ctx.add_init_script(INIT)
             ctx.bb = bb
             return ctx
         async def context2(state):
-            bb = None
+            bb = await p.chromium.launch(executable_path=CHROME, args=ARGS)
             ctx = await bb.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=1, storage_state=state)
             await ctx.add_init_script(INIT); ctx.bb = bb
             return ctx
@@ -603,7 +602,6 @@ async def main():
                 try: await click(pg, '#boardName'); await pg.wait_for_timeout(400)
                 except Exception as e: print('     no name button', e)
             try:
-                print('     join input', await pg.evaluate("(()=>{ const i=document.querySelector('#boardCard [data-view=join] input'); return {dis:i.disabled, ro:i.readOnly, vis:i.getClientRects().length, lbl:i.closest('label').hidden, note:document.querySelector('#boardCard .savenote').textContent}; })()"))
                 await pg.evaluate("(()=>{ const i=document.querySelector('#boardCard [data-view=join] input'); i.value='Old Guest'; })()"); await click(pg, '#boardJoin'); await settle(pg); await pg.wait_for_timeout(1500)
             except Exception as e: print('     join failed', e)
             stt, rec = guest('GET', '/v1/record', code)
