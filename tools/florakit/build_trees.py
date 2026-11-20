@@ -9,8 +9,11 @@ subdivided, given vertical bark ridges by a stretched texture displacement; the 
 clump (a big core ball ringed by smaller lobes, so each clump has a scalloped outline), flattened underneath, each
 decimated on its own so the gaps between clumps stay open. Pines: a skinned tapering trunk with a few dead stubs and
 whorls of drooping, splayed boughs of irregular length (each a flat leaf-shaped pad with a ridge). Snag: a dead oak.
-Each form is built three times on purpose: LOD0 full; LOD1 coarser skin and lighter clumps; LOD2 the limbs only, the
-clumps of each limb fused into one mass (oaks) or one star-shaped skirt per whorl (pines).
+Each form is built three times from one skeleton and one set of clumps or boughs, so the levels share their outline:
+LOD0 full; LOD1 the same skin without subdivision and each clump decimated from its LOD0 mesh (pines: every bough with
+fewer rings); LOD2 each clump as a decimated hull of its LOD0 mesh (pines: one star per whorl whose points are the
+boughs' own tips). Lower clumps are stretched back to their LOD0 clump's bounds, and lower levels take their colours and
+canopy normals from the nearest LOD0 surface, so the switch between levels changes little but the facet count.
 Colour is baked per vertex: ray-traced ambient occlusion against the whole tree and the ground, lit tops and dark
 undersides, warm clumps, bark tone variation and moss on the north and upper sides. Canopy normals lean out from
 each clump's centre (pines: from the trunk) so the toon ramp shades each mass round.
@@ -19,6 +22,7 @@ Blender is Z-up; the export turns that into the game's Y-up frame (x, z, -y), or
 import bpy, bmesh, math, random, sys, os, json, base64, struct, argparse, time
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -69,6 +73,30 @@ def decimate(obj, tris):
         apply_mods(obj)
     m = obj.modifiers.new('tr', 'TRIANGULATE'); apply_mods(obj)
     obj.data.calc_loop_triangles(); return len(obj.data.loop_triangles)
+
+def hull_of(obj):
+    """replace a mesh by its convex hull (triangles)"""
+    bm = bmesh.new()
+    for v in obj.data.vertices: bm.verts.new(v.co)
+    r = bmesh.ops.convex_hull(bm, input=bm.verts[:])
+    drop = {g for g in r['geom_interior'] + r['geom_unused'] if isinstance(g, bmesh.types.BMVert)}
+    bmesh.ops.delete(bm, geom=list(drop), context='VERTS')
+    bmesh.ops.triangulate(bm, faces=bm.faces[:]); bm.to_mesh(obj.data); bm.free(); obj.data.update(); return obj
+
+def fit_bounds(obj, lo, hi):
+    """stretch a decimated clump back to the bounds of its full-detail mesh (decimation pulls the extremes in)"""
+    me = obj.data; vs = [v.co for v in me.vertices]
+    a = Vector((min(v.x for v in vs), min(v.y for v in vs), min(v.z for v in vs))); b = Vector((max(v.x for v in vs), max(v.y for v in vs), max(v.z for v in vs)))
+    for v in me.vertices:
+        for k in range(3): v.co[k] = lo[k] + (v.co[k] - a[k]) / max(b[k] - a[k], 1e-6) * (hi[k] - lo[k])
+    me.update()
+
+def bounds(obj):
+    vs = [v.co for v in obj.data.vertices]
+    return (Vector((min(v.x for v in vs), min(v.y for v in vs), min(v.z for v in vs))), Vector((max(v.x for v in vs), max(v.y for v in vs), max(v.z for v in vs))))
+
+def copy_obj(obj, name):
+    o = link(bpy.data.objects.new(name, obj.data.copy())); o.matrix_world = obj.matrix_world.copy(); return o
 
 def mesh_data(obj):
     """-> (verts [Vector], tris [(a,b,c)]) of a triangulated mesh object"""
@@ -185,17 +213,17 @@ def bough_pad(verts, tris, o, a, L, W, droop, steps, lift=.12):
             for j in range(4):
                 j2 = (j + 1) % 4; tris.append((A[j], B[j], B[j2])); tris.append((A[j], B[j2], A[j2]))
 
-def star_skirt(verts, tris, o, R, n, droop, h, rng, ph):
-    """one whorl as a jagged star-shaped skirt (LOD2): top point, tips and valleys, bottom point"""
+def star_whorl(verts, tris, o, boughs, droop, h):
+    """one whorl (LOD2): a top point, each bough's ridge at mid-length and its tip, a bottom point"""
     top = len(verts); verts.append(o + Vector((0, 0, h))); bot = len(verts); verts.append(o + Vector((0, 0, -.15)))
-    ring = []
-    for k in range(n * 2):
-        a = ph + k / (n * 2) * math.tau; tip = k % 2 == 0
-        rr = R * (rng.uniform(.85, 1.15) if tip else .66); z = -droop * (rr / R) ** 2 * (1 if tip else .6)
-        ring.append(len(verts)); verts.append(o + Vector((math.cos(a) * rr, math.sin(a) * rr, z)))
-    m = len(ring)
-    for k in range(m):
-        a, b = ring[k], ring[(k + 1) % m]; tris.append((top, a, b)); tris.append((bot, b, a))
+    mid = []; tip = []; n = len(boughs)
+    for a, L in boughs:
+        d = Vector((math.cos(a), math.sin(a), 0))
+        mid.append(len(verts)); verts.append(o + d * L * .5 + Vector((0, 0, L * (.03 - .25 * droop + .11))))
+        tip.append(len(verts)); verts.append(o + d * L + Vector((0, 0, L * (.06 - droop))))
+    for k in range(n):
+        k2 = (k + 1) % n
+        tris += [(top, mid[k], mid[k2]), (mid[k], tip[k], mid[k2]), (mid[k2], tip[k], tip[k2]), (bot, tip[k2], tip[k])]
 
 def py_obj(name, verts, tris):
     me = bpy.data.meshes.new(name); me.from_pydata([tuple(v) for v in verts], [], tris); me.update()
@@ -279,8 +307,7 @@ def colour_bark(p, n, ao, seed, H, kind):
         c = c.lerp(P['bark2'] * .7, .5 * (1 - smooth(-.3, .5, p.z)))     # damp dark foot
     return c * (.62 + .38 * ao) * 1.1
 
-def colour_leaf(p, n, ao, t, warm, seed, pine=False, low=False):
-    """low: the fused far masses, whose big undersides would read as holes if shaded like a small clump's"""
+def colour_leaf(p, n, ao, t, warm, seed, pine=False):
     up = n.z; nz = vnoise(p.x * 1.9, p.y * 1.9, p.z * 1.9, seed)
     if pine:
         c = P['pdark'].lerp(P['pmid'], smooth(-.4, .5, up) * .9).lerp(P['plite'], smooth(.2, 1, up) * (.6 + .4 * min(t, .8)))
@@ -288,25 +315,46 @@ def colour_leaf(p, n, ao, t, warm, seed, pine=False, low=False):
     else:
         c = P['dark'].lerp(P['mid'], smooth(-.55, .35, up)).lerp(P['lite'], smooth(.2, .95, up) * (.55 + .45 * t))
         if warm < .2: c = c.lerp(P['warm'] if warm < .12 else P['gold'], clamp(.6 * smooth(-.2, .6, up)))
-        if low: c = c.lerp(P['mid'], .35 * smooth(.1, -.7, up)); ao = .45 + .55 * ao
     c = c * (.88 + .24 * nz) * 1.22
     return c * (.72 + .28 * ao)
 
-def finish(trunk, canopy, kind, seed, H, warmth, pine=False, amt=.62, low=False):
-    """bake both parts against each other and the ground; -> exported trunk + canopy dicts"""
+def take_from(part, ref, vals, k=6):
+    """per vertex: the mean of vals over the k nearest vertices of ref with the same tag (the full-detail surface)"""
+    trees = {}
+    for tg in set(ref.tag):
+        ids = [i for i, t in enumerate(ref.tag) if t == tg]; kd = KDTree(len(ids))
+        for j, i in enumerate(ids): kd.insert(ref.v[i], i)
+        kd.balance(); trees[tg] = kd
+    out = []
+    for p, tg in zip(part.v, part.tag):
+        kd = trees.get(tg) or next(iter(trees.values())); hits = kd.find_n(p, k)
+        w = [1 / (d + .05) for _, _, d in hits]; acc = vals[hits[0][1]] * 0
+        for (_, i, _), wi in zip(hits, w): acc = acc + vals[i] * wi
+        out.append(acc / sum(w))
+    return out
+
+def finish(trunk, canopy, kind, seed, H, warmth, pine=False, amt=.62, ref=None):
+    """bake both parts against each other and the ground; -> exported trunk + canopy dicts. With ref (the LOD0 result) the
+    colours, and the canopy's soft normals, come from the nearest full-detail surface instead"""
     tN = normals_of(trunk.v, trunk.t)
     cN = soft_normals(canopy, amt, axis=pine) if canopy.v else []
-    if low: cN = [(n + Vector((0, 0, .8 * smooth(.2, -.8, n.z)))).normalized() for n in cN]   # big fused undersides catch the sky light
     allv = trunk.v + canopy.v; allt = trunk.t + [(a + len(trunk.v), b + len(trunk.v), c + len(trunk.v)) for a, b, c in canopy.t]
     bvh = BVHTree.FromPolygons([tuple(v) for v in allv], allt)
-    tA = ao_of(trunk.v, tN, bvh, 2.2)
-    tC = [colour_bark(p, n, a, seed, H, kind) for p, n, a in zip(trunk.v, tN, tA)]
+    if ref:
+        rT, rC = ref['_parts']; tC = take_from(trunk, rT, ref['_cols'][0], 4)
+    else:
+        tA = ao_of(trunk.v, tN, bvh, 2.2)
+        tC = [colour_bark(p, n, a, seed, H, kind) for p, n, a in zip(trunk.v, tN, tA)]
     out = dict(trunk=export_geo(trunk.v, trunk.t, tN, tC))
     if canopy.v:
-        gN = normals_of(canopy.v, canopy.t); cA = ao_of(canopy.v, gN, bvh, 3.0)
-        zs = [v.z for v in canopy.v]; z0, z1 = min(zs), max(zs)
-        cC = [colour_leaf(p, n, a, (p.z - z0) / max(z1 - z0, 1e-3), warmth[tg % len(warmth)], seed, pine, low)
-              for p, n, a, tg in zip(canopy.v, cN, cA, canopy.tag)]
+        if ref:
+            cC = take_from(canopy, rC, ref['_cols'][1], 8)
+            cN = [n.normalized() for n in take_from(canopy, rC, ref['_norms'][1], 8)]
+        else:
+            gN = normals_of(canopy.v, canopy.t); cA = ao_of(canopy.v, gN, bvh, 3.0)
+            zs = [v.z for v in canopy.v]; z0, z1 = min(zs), max(zs)
+            cC = [colour_leaf(p, n, a, (p.z - z0) / max(z1 - z0, 1e-3), warmth[tg % len(warmth)], seed, pine)
+                  for p, n, a, tg in zip(canopy.v, cN, cA, canopy.tag)]
         out['canopy'] = export_geo(canopy.v, canopy.t, cN, cC)
         out['_cols'] = (tC, cC); out['_norms'] = (tN, cN)
     else: out['_cols'] = (tC, []); out['_norms'] = (tN, [])
@@ -322,37 +370,35 @@ def trunk_limits(part, rmax, z0=.45, z1=2.2):
             if r > rmax: k = rmax / r; part.v[i] = Vector((v.x * k, v.y * k, v.z))
     return worst
 
-OAK_BUDGET = [(520, 1080), (190, 450), (60, 160)]
+OAK_BUDGET = [(520, 1080), (190, 450), (60, 180)]
 def build_oak(idx, seed):
     rng0 = random.Random(seed)
     H = rng0.uniform(4.2, 5.2); lean = (rng0.uniform(-.5, .5), rng0.uniform(-.5, .5)); nlimb = 3 + (idx % 2)
     warmth = [rng0.random() for _ in range(40)]
+    rng = random.Random(seed)
+    for _ in range(3 + 2 + nlimb + 1): rng.random()
+    sk, clumps = oak_skeleton(rng, H, lean, nlimb, 0)
+    crng = random.Random(seed * 7 + 1); full = []
+    for k, (c, R, limb) in enumerate(clumps):
+        o = clump_mesh('cl%d' % k, [(c, R)], crng, .34); decimate(o, OAK_BUDGET[0][1] // len(clumps)); full.append((o, c, k, bounds(o)))
     lods = []
     for lod in range(3):
-        rng = random.Random(seed)        # the same skeleton draws for every level: the levels share their silhouette
-        for _ in range(3 + 2 + nlimb + 1): rng.random()
-        sk, clumps = oak_skeleton(rng, H, lean, nlimb, lod)
         tb, cb = OAK_BUDGET[lod]
         to = skin('oakT', sk, subsurf=1 if lod == 0 else 0, bark=.07 if lod == 0 else 0, seed=seed)
         decimate(to, tb); trunk = Part(); trunk.add_obj(to); remove(to)
         trunk_limits(trunk, .5)
-        canopy = Part(); crng = random.Random(seed * 7 + 1)
-        if lod < 2:
-            per = cb // len(clumps)
-            for k, (c, R, limb) in enumerate(clumps):
-                o = clump_mesh('cl%d' % k, [(c, R)], crng, .34 if lod == 0 else .5)
-                decimate(o, per); canopy.add_obj(o, c, k); remove(o)
-        else:  # one mass per limb: its clumps fused
-            groups = {}
-            for c, R, limb in clumps: groups.setdefault(limb, []).append((c, R))
-            per = cb // len(groups)
-            for limb, cs in groups.items():
-                o = clump_mesh('ml%d' % limb, [(c, R * 1.05) for c, R in cs], crng, .6)
-                decimate(o, per); cen = sum((c for c, R in cs), Vector()) / len(cs); canopy.add_obj(o, cen, limb); remove(o)
-        lods.append(finish(trunk, canopy, 'oak', seed, H, warmth, low=lod == 2))
+        canopy = Part()
+        for o0, c, k, (lo, hi) in full:
+            o = o0 if lod == 0 else copy_obj(o0, 'cl%d_%d' % (k, lod))
+            if lod == 2: hull_of(o)
+            if lod: decimate(o, cb // len(clumps)); fit_bounds(o, lo, hi)
+            canopy.add_obj(o, c, k)
+            if lod: remove(o)
+        lods.append(finish(trunk, canopy, 'oak', seed, H, warmth, ref=lods[0] if lod else None))
+    for o0, *_ in full: remove(o0)
     return dict(name='oak%d' % idx, h=round(H, 3), lods=lods)
 
-PINE_BUDGET = [(150, 1250), (60, 520), (24, 170)]
+PINE_BUDGET = [(150, 1250), (60, 0), (24, 0)]
 def build_pine(idx, seed):
     rng0 = random.Random(seed); H = rng0.uniform(9.6, 11.4); bend = (rng0.uniform(-.25, .25), rng0.uniform(-.25, .25))
     ntier = 10 if idx != 1 else 11
@@ -360,7 +406,7 @@ def build_pine(idx, seed):
     ax = lambda z: Vector((bend[0] * math.sin(z / H * 2), bend[1] * math.sin(z / H * 2), z))
     for lod in range(3):
         rng = random.Random(seed * 3 + 11)
-        sk = Skel(); prev = sk.add((0, 0, -.3), .32); ns = 4 if lod == 0 else 2
+        sk = Skel(); prev = sk.add((0, 0, -.3), .32); ns = 4
         for k in range(1, ns + 1):
             z = H * .98 * k / ns; prev = sk.add(ax(z), lerp(.3, .05, k / ns), prev)
         if lod == 0:   # bare dead stubs just above head height
@@ -376,15 +422,12 @@ def build_pine(idx, seed):
             R = lerp(3.0, .8, t) * trng.uniform(.85, 1.12); ph = trng.uniform(0, math.tau)
             nb = int(round(lerp(7, 3, t))); droop = lerp(.45, .3, t)
             lens = [R * trng.uniform(.62, 1.18) for _ in range(nb)]; jit = [trng.uniform(-.25, .25) for _ in range(nb)]
-            if lod == 0:
+            angs = [ph + (b + jit[b]) / nb * math.tau for b in range(nb)]
+            if lod < 2:   # LOD1: every bough, fewer rings (the long low ones keep three)
                 for b in range(nb):
-                    bough_pad(vs, ts, o, ph + (b + jit[b]) / nb * math.tau, lens[b], lens[b] * .5, droop, 4, lift=.06)
-            elif lod == 1:
-                m = max(3, nb // 2 + 1)
-                for b in range(m):
-                    bough_pad(vs, ts, o, ph + b / m * math.tau + jit[b] * .5, max(lens[b::m] + [lens[b % nb]]), R * .55, droop, 3, lift=.1)
-            else:   # every whorl, so the far pine keeps the bulk of the near ones
-                star_skirt(vs, ts, o + Vector((0, 0, .05)), R * 1.04, max(4, nb // 2 + 1), droop * R * 1.0, .55 + .3 * (1 - t), trng, ph)
+                    bough_pad(vs, ts, o, angs[b], lens[b], lens[b] * .5, droop, 4 if lod == 0 else 3 if k < 3 else 2, lift=.06)
+            else:   # a star whose points are the boughs' tips
+                star_whorl(vs, ts, o, sorted((a % math.tau, L) for a, L in zip(angs, lens)), droop, .1 * max(lens))
         # the leader: a short, blunt top whorl rather than a needle
         o = ax(H - .7); n0 = len(vs)
         vs += [o + Vector((0, 0, .95))]; ring = []; mid = []
@@ -399,18 +442,17 @@ def build_pine(idx, seed):
         # each vertex leans out from the trunk axis at its own height (centre on the axis)
         canopy.v = vv; canopy.t = tt; canopy.tag = [0] * len(vv)
         canopy.c = [None if v.z > H - .9 else ax(v.z) for v in vv]   # the leader keeps its own facets: no sky-lit cap
-        lods.append(finish(trunk, canopy, 'pine', seed, H, [0], pine=True, amt=.5))
+        lods.append(finish(trunk, canopy, 'pine', seed, H, [0], pine=True, amt=.5, ref=lods[0] if lod else None))
     return dict(name='pine%d' % idx, h=round(H, 3), lods=lods)
 
-SNAG_BUDGET = [500, 220, 70]
+SNAG_BUDGET = [500, 220, 100]
 def build_snag(seed):
     rng0 = random.Random(seed); H = 4.4; lean = (.3, -.2); lods = []
+    sk, clumps = oak_skeleton(random.Random(seed), H, lean, 4, 0)
     for lod in range(3):
-        rng = random.Random(seed)
-        sk, clumps = oak_skeleton(rng, H, lean, 4, lod)
         to = skin('snagT', sk, subsurf=1 if lod == 0 else 0, bark=.06 if lod == 0 else 0, seed=seed)
         decimate(to, SNAG_BUDGET[lod]); trunk = Part(); trunk.add_obj(to); remove(to); trunk_limits(trunk, .5)
-        lods.append(finish(trunk, Part(), 'snag', seed, H, [0]))
+        lods.append(finish(trunk, Part(), 'snag', seed, H, [0], ref=lods[0] if lod else None))
     return dict(name='snag', h=H, lods=lods)
 
 FORMS = [('oak0', lambda: build_oak(0, 101)), ('oak1', lambda: build_oak(1, 202)), ('oak2', lambda: build_oak(2, 303)),

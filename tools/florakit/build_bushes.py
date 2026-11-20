@@ -14,7 +14,7 @@ masses are pushed out from the clump and bush centres so the toon ramp shades ea
 Blender is Z-up; the export is the game's Y-up frame (x, z, -y), origin at the foot, metres.
 """
 import bpy, bmesh, math, os, sys, json, base64, struct, argparse, time
-from mathutils import Vector, noise
+from mathutils import Vector, Matrix, noise
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
 
@@ -55,11 +55,16 @@ class Build:
         for v in verts: v[self.part] = part; v[self.cid] = cid
     def clump(self, c, r, sq=(1, 1, .8), sub=2, lump=.22, seed=0, spike=0.0, rag=0.0):
         """leaf mass: displaced icosphere; spike = per-vertex outward jitter (gorse), rag = ragged top (heather)"""
-        res = bmesh.ops.create_icosphere(self.bm, subdivisions=sub + 1, radius=1.0)
-        if sub == 0: res = dict(verts=res['verts'])
-        vs = res['verts']; cid = len(self.clumps); self.clumps.append((Vector(c), r * max(sq))); self.sq.append(sq)
+        if sub < 0:     # the far level: a squat bipyramid (eight faces), turned per clump, sized to the same outline
+            a0 = hash1(seed, 4) * 6.28
+            q = [(math.cos(a0 + k * 1.5708), math.sin(a0 + k * 1.5708), .12) for k in range(4)] + [(0, 0, .95), (0, 0, -.8)]
+            vs = [self.bm.verts.new(Vector(v)) for v in q]
+            for k in range(4): self.bm.faces.new((vs[k], vs[(k + 1) % 4], vs[4])); self.bm.faces.new((vs[(k + 1) % 4], vs[k], vs[5]))
+            r *= 1.14
+        else: vs = bmesh.ops.create_icosphere(self.bm, subdivisions=sub + 1, radius=1.0)['verts']
+        cid = len(self.clumps); self.clumps.append((Vector(c), r * max(sq))); self.sq.append(sq)
         for v in vs:
-            d = v.co.normalized()
+            d = v.co.normalized() if sub >= 0 else v.co.copy()
             k = 1 + lump * nz(d * 1.6, seed) + lump * .45 * nz(d * 3.7, seed + 3)
             if spike: k += spike * (hash1(v.index, seed, 3) - .35)
             p = Vector((d.x * sq[0], d.y * sq[1], d.z * sq[2])) * r * k
@@ -110,7 +115,12 @@ class Build:
             for k in range(sides): self.bm.faces.new((rings[-1][k], rings[-1][(k + 1) % sides], tip))
             rings.append([tip])
         self._tag([v for r in rings for v in r], self.STEM)
-    def frond(self, base, yaw, L, W, e0, e1, pinnae, droop=.35, serr=False, twist=0.0, tipcurl=0.0, shape='lance'):
+    def blade(self, a, b, w):
+        """a stipe far away: one thin triangle from a (foot, w wide) up to b"""
+        d = (Vector(b) - Vector(a)); s = Vector((-d.y, d.x, 0)).normalized() * w
+        vs = [self.bm.verts.new(Vector(a) - s), self.bm.verts.new(Vector(a) + s), self.bm.verts.new(Vector(b))]
+        self.bm.faces.new(vs); self._tag(vs, self.STEM)
+    def frond(self, base, yaw, L, W, e0, e1, pinnae, droop=.35, serr=False, twist=0.0, tipcurl=0.0, shape='lance', kite=False):
         """an arching pinnate frond: spine from base, elevation e0 -> e1 (radians); outline cut into the mesh as
         alternating pinna tips and notches on both sides (serr: each pinna also toothed)"""
         f = Vector((math.cos(yaw), math.sin(yaw), 0)); side0 = Vector((-f.y, f.x, 0))
@@ -140,10 +150,14 @@ class Build:
                 S0, S1, S2 = verts_sp[2 * k], verts_sp[2 * k + 1], verts_sp[2 * k + 2]
                 N0, N1, T = notch[k], notch[k + 1], tips[k]
                 q = (lambda a, b, c: self.bm.faces.new((a, b, c) if sd > 0 else (a, c, b)))
-                if serr:
+                if kite: q(S0, T, S1); q(S1, T, S2)
+                elif serr:
                     M = mids[k]; q(S0, N0, M); q(S0, M, T); q(S0, T, S2); q(S2, T, N1)
                 else:
                     q(S0, N0, T); q(S0, T, S2); q(S2, T, N1)
+            if kite:
+                for v in notch: self.bm.verts.remove(v)
+                notch = []
             allv += notch + tips + mids
         tip = verts_sp[-1]
         self._tag(allv, self.FROND)
@@ -171,6 +185,14 @@ def decimate(obj, tris):
     return ntris(obj)
 
 # ---------------------------------------------------------------- the models: fn(rng, lod) -> Build
+# Every level is laid out from the same random draws as LOD0 (same clump centres, sizes, stems and fronds); the lower
+# levels only use coarser pieces: icospheres a step down (a little larger, so the faceted shape covers the same outline),
+# fewer spikes and beads (bigger), thinner stem tubes or none, fronds with fewer pinnae.
+def lo(sub, lod):
+    """clump resolution and radius factor at this level for a clump modelled at `sub` on LOD0 (LOD2: octahedra)"""
+    if lod == 2: return -1, 1.0
+    s = max(0, sub - lod); return s, (1.0 if s == sub else 1.09)
+
 def m_hazel(rng, lod):
     """hazel: a few springy stems under a crown of big, round leaf clumps; the outer clumps sit lower so the outline
     is a soft dome with scalloped edges rather than a heap of facets"""
@@ -183,89 +205,77 @@ def m_hazel(rng, lod):
         if lod == 0: b.tube(pts, [.032, .024, .016], 4)
         elif lod == 1 and k % 2 == 0: b.tube([pts[0], pts[2]], [.03, .016], 3)
         tops.append(pts[-1])
-    if lod == 2:
-        b.clump((0, 0, .74), .48, (1.15, 1.1, .82), 0, .1, 3); b.clump((.38, .14, .6), .3, (1, 1, .85), 0, .1, 5)
-        b.clump((-.3, -.26, .58), .3, (1, 1, .85), 0, .1, 6)
-        return b
-    # crown: one high centre clump and a ring of slightly lower ones (LOD1: fewer and bigger)
-    b.clump((0, 0, .86), (.36, .42)[lod], (1.1, 1.1, .82), 1, .12, 99)
-    nc = (5, 4)[lod]
-    for k in range(nc):
-        t = tops[k % 5] if lod == 0 else tops[(k * 5) // 4]
-        r = rng.r(.27, .32) * (1, 1.12)[lod]
-        c = Vector((t.x * 1.15, t.y * 1.15, t.z + r * .25))
-        b.clump(c, r, (1.08, 1.05, .84), 1 if lod == 0 else 0, .12, k * 3 + 1)
-    if lod == 0:
+    s, f = lo(1, lod); b.clump((0, 0, .86), .36 * f, (1.1, 1.1, .82), s, .12, 99)
+    for k in range(5):
+        t = tops[k]; r = rng.r(.27, .32)
+        b.clump(Vector((t.x * 1.15, t.y * 1.15, t.z + r * .25)), r * f, (1.08, 1.05, .84), s, .12, k * 3 + 1)
+    if lod < 2:
         for k in range(3):   # small lobes low on the rim break the dome's edge
-            a = k / 3 * 6.28 + 1.1; c = Vector((math.cos(a) * .5, math.sin(a) * .5, .48))
-            b.clump(c, .18, (1.05, 1.05, .8), 0, .1, 40 + k)
+            a = k / 3 * 6.28 + 1.1; b.clump(Vector((math.cos(a) * .5, math.sin(a) * .5, .48)), .18, (1.05, 1.05, .8), -lod, .1, 40 + k)
     return b
 
 def m_holly(rng, lod):
     """holly: a dark, glossy pyramid of overlapping clumps, broad at the base, a pointed top, prickly edges and a few
     clusters of red berries on the sunny side"""
-    b = Build(); sub = (1, 0, 0)[lod]
+    b = Build(); s, f = lo(1, lod)
     if lod == 0: b.tube([Vector((0, 0, 0)), Vector((.02, 0, .5)), Vector((0, .02, 1.05))], [.05, .035, .015], 4)
-    tiers = [(.36, .46, 3, .34), (.7, .34, 3, .2), (1.0, .22, 1, 0)] if lod == 0 else [(.38, .48, 2, .3), (.74, .34, 2, .14), (1.02, .2, 1, 0)]
-    if lod == 2: tiers = [(.42, .5, 1, 0), (.86, .3, 1, 0)]
     k = 0
-    for ti, (z, r, n, off) in enumerate(tiers):
+    for ti, (z, r, n, off) in enumerate([(.36, .46, 3, .34), (.7, .34, 3, .2), (1.0, .22, 1, 0)]):
         for j in range(n):
             a = j / n * 6.28 + ti * 1.05 + rng.r(-.2, .2)
             rr = r * (rng.r(.85, .95) if n > 1 else 1.0)
-            b.clump((math.cos(a) * off, math.sin(a) * off, z + rng.r(-.03, .03)), rr, (1, 1, .95 if ti < 2 else 1.25), sub, .16, k * 7 + 2)
+            b.clump((math.cos(a) * off, math.sin(a) * off, z + rng.r(-.03, .03)), rr * f, (1, 1, .95 if ti < 2 else 1.25), s, .16, k * 7 + 2)
             if lod == 0: b.spikes(k, 7, .09, .028, -.2, k)
             k += 1
-    nb = (4, 2, 2)[lod]
-    for i in range(nb):     # berry clusters: three beads each on LOD0
+    for i in range(4):     # berry clusters: three beads each on LOD0, one bigger bead on LOD1, none far off
         cid = i % k; c, r = b.clumps[cid]; a = i * 2.4 + .6
-        base = c + Vector((math.cos(a) * r * .86, math.sin(a) * r * .86, r * .25))
+        base = c + Vector((math.cos(a), math.sin(a), .29)) * r * (.86, .96, 1.0)[lod]
+        if lod == 2: break
         for q in range((3, 1, 1)[lod]):
-            b.bead(base + Vector(((q - 1) * .045, (q % 2) * .04, 0)), .045 if lod < 2 else .08)
+            b.bead(base + Vector(((q - 1) * .045, (q % 2) * .04, 0)), (.045, .065, .085)[lod])
     return b
 
 def m_bramble(rng, lod):
     """bramble: a low tangled mound with long canes arching out of it, each ending in a leafy tuft, and blackberries
     on top"""
-    b = Build(); sub = (1, 0, 0)[lod]
-    nc = (5, 4, 3)[lod]
+    b = Build(); s, f = lo(1, lod)
+    nc = 5
     for k in range(nc):
         a = k / nc * 6.28 + rng.r(0, .6); off = rng.r(.3, .4) if k else 0
-        rr = (rng.r(.28, .34) if k else .4) * (1.3 if lod == 2 else 1.08 if lod else 1)
-        b.clump((math.cos(a) * off, math.sin(a) * off, rng.r(.2, .26) if k else .34), rr, (1.15, 1.1, .78), sub, .2, k * 11 + 4)
-    nca = (4, 3, 0)[lod]
-    for k in range(nca):
-        a = k / max(nca, 1) * 6.28 + rng.r(-.3, .3) + .5; d = Vector((math.cos(a), math.sin(a), 0)); R = rng.r(.55, .66); H = rng.r(.7, .82)
-        ts = (0, .35, .62, .88) if lod == 0 else (0, .5, .88)
-        pts = [d * (.15 + R * t) + Vector((0, 0, .2 + (H - .2) * math.sin(math.pi * t ** .75) - .25 * t)) for t in ts]
-        b.tube(pts, [.034, .03, .024, .018][:len(pts)] if lod == 0 else [.032, .026, .018], 4 if lod == 0 else 3)
-        b.clump(pts[-2] + Vector((0, 0, .06)), (.17, .19)[lod], (1.1, 1.1, .9), 0, .12, 60 + k)   # leaves along the arch
+        rr = rng.r(.28, .34) if k else .4
+        b.clump((math.cos(a) * off, math.sin(a) * off, rng.r(.2, .26) if k else .34), rr * f, (1.15, 1.1, .78), s, .2, k * 11 + 4)
+    for k in range(4):
+        a = k / 4 * 6.28 + rng.r(-.3, .3) + .5; d = Vector((math.cos(a), math.sin(a), 0)); R = rng.r(.55, .66); H = rng.r(.7, .82)
+        pts = [d * (.15 + R * t) + Vector((0, 0, .2 + (H - .2) * math.sin(math.pi * t ** .75) - .25 * t)) for t in (0, .35, .62, .88)]
+        if lod == 0: b.tube(pts, [.034, .03, .024, .018], 4)
+        elif lod == 1: b.tube([pts[0], pts[2], pts[3]], [.034, .026, .018], 3)
+        if lod < 2: b.clump(pts[2] + Vector((0, 0, .06)), .17 * (1, 1.04)[lod], (1.1, 1.1, .9), -lod, .12, 60 + k)   # leaves along the arch
+        else: b.bead(pts[2] + Vector((0, 0, .06)), .2, Build.LEAF)
     for i in range((6, 3, 0)[lod]):
-        c, r = b.clumps[i % nc]; a = i * 2.4
-        b.bead(c + Vector((math.cos(a) * r * .7, math.sin(a) * r * .7, r * .62)), .04)
+        c, r = b.clumps[(i * 2 if lod else i) % nc]; a = i * 2.4
+        b.bead(c + Vector((math.cos(a) * r * .7, math.sin(a) * r * .7, r * .62)), (.04, .055)[lod])
     return b
 
 def m_fern(rng, lod):
-    b = Build()
-    nf, pin = ((6, 6), (5, 3), (5, 1))[lod]
-    for k in range(nf):
-        a = k / nf * 6.28 + rng.r(-.25, .25); L = rng.r(.75, .9) * (1 if lod < 2 else .95)
+    """fern: a shuttlecock of arching fronds; the same fronds at every level, cut into fewer pinnae"""
+    b = Build(); pin = (5, 2, 1)[lod]
+    for k in range(6):
+        a = k / 6 * 6.28 + rng.r(-.25, .25); L = rng.r(.75, .9)
         b.frond((math.cos(a) * .03, math.sin(a) * .03, 0), a, L, rng.r(.13, .16), rng.r(1.3, 1.5), rng.r(-.35, -.05), pin,
-                droop=.3, twist=.15, tipcurl=.2 if lod == 0 else 0)
+                droop=.3, twist=.15, tipcurl=.2 if lod == 0 else 0, kite=lod > 0)
     return b
 
 def m_bracken(rng, lod):
-    b = Build()
-    nf = (4, 4, 3)[lod]; pin = (4, 3, 1)[lod]
-    for k in range(nf):
-        a = k / nf * 6.28 + rng.r(-.4, .4); lean = rng.r(.2, .35); h = rng.r(.3, .4)
+    """bracken: stiff stipes, each holding out one broad triangular frond"""
+    b = Build(); pin = (4, 2, 1)[lod]
+    for k in range(4):
+        a = k / 4 * 6.28 + rng.r(-.4, .4); lean = rng.r(.2, .35); h = rng.r(.3, .4)
         d = Vector((math.cos(a), math.sin(a), 0))
         top = d * (h * math.sin(lean)) + Vector((0, 0, h))
-        if lod == 2:
-            b.frond(d * .02, a, h + .6, .34, 1.15, -.45, 1, droop=.15, shape='delta'); continue
-        b.tube([d * .02, top], [.012, .007], 3)
+        if lod == 0: b.tube([d * .02, top], [.012, .007], 3)
+        else: b.blade(d * .02, top, .02)
         b.frond(top, a + rng.r(-.2, .2), rng.r(.62, .72), rng.r(.3, .34), rng.r(.55, .7), rng.r(-.7, -.5), pin, droop=.12,
-                serr=False, twist=.1, shape='delta')
+                serr=False, twist=.1, shape='delta', kite=lod == 2)
     return b
 
 def m_gorse(rng, lod):
@@ -277,32 +287,26 @@ def m_gorse(rng, lod):
             cid = 0 if (i % 3 or len(b.clumps) == 1) else 1 + (i // 3) % (len(b.clumps) - 1)
             c, rad = b.clumps[cid]; sq = b.sq[cid]
             b.bead(c + Vector((rr * math.cos(a) * sq[0], rr * math.sin(a) * sq[1], z * sq[2])) * rad / max(sq) * 1.02, r, cid=cid)
-    if lod == 2:
-        b.clump((0, 0, .45), .64, (1.12, 1, .82), 1, .12, 2)
-        flowers(6, .11)
-        return b
-    b.clump((0, 0, .47), .6, (1.1, 1, .84), 1, .16, 2)
-    if lod == 0: b.clump((.42, .16, .3), .36, (1, 1, .85), 1, .2, 6); b.clump((-.36, -.3, .27), .32, (1, 1, .85), 1, .2, 8)
-    else: b.clump((.32, -.1, .28), .38, (1.2, 1, .8), 1, .2, 6)
-    b.spikes(0, (24, 12)[lod], .13, .05, -.1, 1, up=.2)
-    if lod == 0: b.spikes(1, 6, .11, .045, -.1, 2); b.spikes(2, 6, .11, .045, -.1, 3)
-    flowers((28, 13)[lod], (.075, .09)[lod])
+    b.clump((0, 0, .47), .6 * (1, 1, 1.09)[lod], (1.1, 1, .84), (1, 1, 0)[lod], .16, 2)
+    b.clump((.42, .16, .3), .36 * (1, 1.09, 1.09)[lod], (1, 1, .85), (1, 0, 0)[lod], .2, 6)
+    b.clump((-.36, -.3, .27), .32 * (1, 1.09, 1.09)[lod], (1, 1, .85), (1, 0, 0)[lod], .2, 8)
+    if lod < 2:
+        b.spikes(0, (24, 12)[lod], (.13, .15)[lod], (.05, .06)[lod], -.1, 1, up=.2)
+        b.spikes(1, (6, 3)[lod], .11, .045, -.1, 2); b.spikes(2, (6, 3)[lod], .11, .045, -.1, 3)
+    flowers((28, 14, 8)[lod], (.075, .105, .13)[lod])
     return b
 
 def m_heather(rng, lod):
     """heather: a cushion of ragged clumps heaped into a mound, purple flower spikes standing thick out of the top"""
-    b = Build()
-    if lod == 2:
-        b.clump((0, 0, .22), .44, (1.2, 1.08, .86), 1, .16, 1)
-        b.spikes(0, 4, .14, .04, .4, 0, part=Build.FLOWER, up=1.3)
-        return b
-    n = (5, 3)[lod]
+    b = Build(); n = 5
     for k in range(n):
         a = k / max(n - 1, 1) * 6.28 + rng.r(0, .8); off = rng.r(.22, .3) if k else 0
-        b.clump((math.cos(a) * off, math.sin(a) * off, .17 if k else .24), (rng.r(.22, .27) if k else .35), (1.12, 1.05, .9),
-                1 if (lod == 0 or k == 0) else 0, .2, k * 5 + 1, rag=(.2, .16)[lod])
-    sp = (12, 7)[lod]
-    for k in range(n): b.spikes(k, sp if k == 0 else max(3, sp * 2 // 3), .15, .035, .3, k, part=Build.FLOWER, up=1.3)
+        s, f = lo(1, lod)
+        b.clump((math.cos(a) * off, math.sin(a) * off, .17 if k else .24), (rng.r(.22, .27) if k else .35) * f, (1.12, 1.05, .9),
+                s, .2, k * 5 + 1, rag=(.2, .18, .14)[lod])
+    sp = (12, 6, 5)[lod]
+    for k in range(n if lod < 2 else 1):
+        b.spikes(k, sp if k == 0 else max(2, sp * 2 // 3), (.15, .16, .17)[lod], (.035, .042, .05)[lod], .3, k, part=Build.FLOWER, up=1.3)
     return b
 
 # ---------------------------------------------------------------- colour bake (sRGB palette, final colour incl. AO)
@@ -381,7 +385,7 @@ def vertex_data(kind, obj, ref, lod):
     me = obj.data; me.update()
     bm = bmesh.new(); bm.from_mesh(me); bm.verts.ensure_lookup_table(); bm.normal_update()
     gc = Vector((0, 0, zmax * .42))
-    out = []
+    out = []; pl = []
     for v in bm.verts:
         p = v.co; _, j, _ = kd.find(p); part = parts[j]; cid = cids[j]
         if part == Build.LEAF and cid >= 0 and cid < len(clumps):
@@ -396,10 +400,37 @@ def vertex_data(kind, obj, ref, lod):
         top = clamp(p.z / max(zmax, 1e-3))
         if part == Build.FROND: top = clamp(.25 + .75 * Vector((p.x, p.y)).length / .7) * .6 + top * .4
         ao = bake_ao(bvh, p, n if part != Build.FROND else Vector((0, 0, 1)), .55 if part != Build.FROND else .35)
-        out.append((p.copy(), n, colour(kind, p, n, ao, part, heart, top, lod, cid)))
+        out.append((p.copy(), n, colour(kind, p, n, ao, part, heart, top, lod, cid))); pl.append(part)
     tris = [[v.index for v in f.verts] for f in bm.faces]
     bm.free()
-    return out, tris
+    return out, tris, pl
+
+def tone(verts, tris, parts):
+    """area-weighted mean colour per part"""
+    acc = {}
+    for t in tris:
+        a, b, c = (verts[i][0] for i in t); w = (b - a).cross(c - a).length * .5
+        m = acc.setdefault(parts[t[0]], [Vector((0, 0, 0)), 0.0])
+        m[0] += (verts[t[0]][2] + verts[t[1]][2] + verts[t[2]][2]) * (w / 3); m[1] += w
+    return {k: v[0] / max(v[1], 1e-9) for k, v in acc.items()}
+
+def match_tone(verts, tris, parts, ref):
+    """scale each part's colours so its mean tone is the full model's (the coarser pieces hide fewer dark hearts)"""
+    me = tone(verts, tris, parts); g = {}
+    for k, m in me.items():
+        r = ref.get(k, m); g[k] = Vector([clamp(r[i] / max(m[i], 1e-4), .8, 1.25) for i in range(3)])
+    return [(p, n, Vector((c.x * g[pt].x, c.y * g[pt].y, c.z * g[pt].z))) for (p, n, c), pt in zip(verts, parts)]
+
+def bounds(obj): vs = [v.co for v in obj.data.vertices]; return [min(v[k] for v in vs) for k in range(3)], [max(v[k] for v in vs) for k in range(3)]
+
+def match_bounds(obj, ref):
+    """stretch a coarser level to the full model's footprint and height (about the foot)"""
+    (a0, b0), (a1, b1) = ref, bounds(obj)
+    c0 = [(a0[k] + b0[k]) / 2 for k in range(2)]; c1 = [(a1[k] + b1[k]) / 2 for k in range(2)]
+    sc = [clamp((b0[k] - a0[k]) / max(b1[k] - a1[k], 1e-4), .88, 1.14) for k in range(2)] + [clamp(b0[2] / max(b1[2], 1e-4), .88, 1.14)]
+    for v in obj.data.vertices: v.co = Vector((c0[0] + (v.co.x - c1[0]) * sc[0], c0[1] + (v.co.y - c1[1]) * sc[1], v.co.z * sc[2]))
+    k = (sc[0] + sc[1] + sc[2]) / 3
+    obj['clumps'] = [[c0[0] + (c[0] - c1[0]) * sc[0], c0[1] + (c[1] - c1[1]) * sc[1], c[2] * sc[2], c[3] * k] for c in obj['clumps']]
 
 def reference(obj):
     me = obj.data; me.update()
@@ -430,13 +461,13 @@ def export(verts, tris):
 
 # ---------------------------------------------------------------- the list: name, builder, budgets per level, seed
 KINDS = [
-    ('shrub',   m_hazel,   (500, 250, 60), 11),
-    ('holly',   m_holly,   (480, 240, 60), 23),
-    ('bramble', m_bramble, (500, 250, 60), 37),
-    ('bracken', m_bracken, (220, 110, 24), 41),
-    ('fern',    m_fern,    (220, 110, 24), 53),
-    ('gorse',   m_gorse,   (500, 250, 100), 67),
-    ('heather', m_heather, (380, 190, 100), 79),
+    ('shrub',   m_hazel,   (400, 140, 48), 11),
+    ('holly',   m_holly,   (400, 156, 56), 23),
+    ('bramble', m_bramble, (400, 140, 56), 37),
+    ('bracken', m_bracken, (132, 52, 20), 41),
+    ('fern',    m_fern,    (180, 48, 24), 53),
+    ('gorse',   m_gorse,   (460, 205, 92), 67),
+    ('heather', m_heather, (380, 166, 60), 79),
 ]
 COLKIND = {'shrub': 'hazel'}
 
@@ -484,10 +515,14 @@ def main():
         ck = COLKIND.get(name, name); rec = []; objs = []; ref0 = None
         for lod in range(3):
             obj = fn(RNG(seed * 1009 + 7), lod).finish('%s_%d' % (name, lod))
+            if ref0 is None: box0 = bounds(obj)
+            else: match_bounds(obj, box0)
             kd, parts, cids, clumps, zmax, bvh = reference(obj)
             if ref0 is None: ref0 = bvh                         # every level is shaded against the full model
             tri = decimate(obj, budgets[lod])
-            verts, tris = vertex_data(ck, obj, (ref0, kd, parts, cids, clumps, zmax), lod)
+            verts, tris, vp = vertex_data(ck, obj, (ref0, kd, parts, cids, clumps, zmax), lod)
+            if lod == 0: tone0 = tone(verts, tris, vp)
+            else: verts = match_tone(verts, tris, vp, tone0)
             rec.append(export(verts, tris))
             ca = obj.data.color_attributes.new('Col', 'BYTE_COLOR', 'POINT')
             for i, (_, _, c) in enumerate(verts): ca.data[i].color_srgb = (min(1, c.x * 1.5), min(1, c.y * 1.5), min(1, c.z * 1.5), 1)

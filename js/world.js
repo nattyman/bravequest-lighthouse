@@ -290,44 +290,72 @@ class Tiled{
   }
   get count(){let n=0;for(const [,v] of this.t)n+=v.length;return n;}
 }
-/* trees with distance LOD (Blender tree kit): trees near the focus go into per-form instanced pools (LOD0 close, LOD1
-   further out); every tree also sits in one merged LOD2 mesh per 80 m tile and part, which sways by a per-vertex root
-   attribute and drops (in the vertex shader) the trees the pools are drawing. The band centre only moves after the focus
-   has moved a few metres, so trees switch once and never flicker. saver: merged LOD2 only. */
-const TLOD={saver:[0,0],balanced:[16,46],high:[24,64]}, TLOD_STEP=3;
-const TL={u:{value:new THREE.Vector3(0,0,0)},update:null,stats:{}}, _m4=new THREE.Matrix4();
-G.system('treeLOD',{order:80,modes:'always',update(){ if(TL.update)TL.update(false); }});
+/* trees with distance LOD (Blender tree kit): every tree sits in one merged LOD2 mesh per 80 m tile and part (it sways by a
+   per-vertex root attribute); trees near the focus are also drawn from per-form instanced pools, LOD0 close and LOD1 further
+   out. Each tree dissolves from one level into the next across a band (TLOD: band centre and width per switch), by its own
+   distance to the focus, computed in the shader every frame: a screen-door dither where every pixel shows exactly one level.
+   The pools hold the trees in or near their bands and in or near the view; they are refilled on the CPU when the focus or the
+   camera has moved a little, and the margins mean a tree only joins or leaves a pool while that level is fully dissolved.
+   Shadows dissolve the same way in the shadow map; trees outside the view (not in the pools) cast from the merged mesh.
+   saver: merged LOD2 only. */
+const TLOD={saver:null,balanced:[28,5,60,9],high:[34,6,76,10]}, TL_STEP=1, TL_CAM=1, TL_TURN=.14, TL_MARG=.38, TL_R=7;
+const TL={u:{uTF:{value:new THREE.Vector4()},uTB:{value:new THREE.Vector4(-9,1,-9,1)},uTV:{value:new THREE.Vector4(0,0,0,1)},uTV2:{value:new THREE.Vector4(9,10,TL_R,0)}},update:null,stats:{}};
+G.system('treeLOD',{order:98,modes:'always',update(){ if(TL.update)TL.update(false); }}); // after everything that moves the camera
 const _h1=(x,z)=>{const v=Math.sin(x*12.9898+z*78.233)*43758.5453; return v-Math.floor(v);};
-function mergedTreeMat(base,leaf,key){
-  const m=foliageShader(G.toon('#ffffff',{vertexColors:true}),{leaf});
+/* x: LOD0->1 dissolve, y: LOD1->2, z: how far the tree is inside the view (shadow casting: pools inside, merged outside) */
+const TL_VS=`uniform vec4 uTF,uTB,uTV,uTV2; varying vec3 vTF;
+vec3 bqTreeFade(vec2 p){ float d=distance(p,uTF.xy); vec2 v=p-uTV.xy; float l=max(length(v),.001);
+  float an=acos(clamp(dot(v/l,uTV.zw),-1.,1.))-asin(min(1.,uTV2.z/l));
+  return vec3(clamp((d-uTB.x)/uTB.y,0.,1.),clamp((d-uTB.z)/uTB.w,0.,1.),1.-smoothstep(uTV2.x,uTV2.y,an)); }`;
+// which pixels a level keeps: 0, 1 (pools) and 2 (merged); depth passes also split by the view weight
+const TL_KEEP=['n>=vTF.x','n<vTF.x&&n>=vTF.y','n<vTF.y'], TL_DKEEP=['n>=vTF.x&&n<vTF.z','n<vTF.x&&n>=vTF.y&&n<vTF.z','n<vTF.y||n>=vTF.z'];
+const TL_GONE=['f.x>=1.','f.x<=0.||f.y>=1.','f.y<=0.'], TL_DGONE=['f.x>=1.||f.z<=0.','f.x<=0.||f.y>=1.||f.z<=0.','f.y<=0.&&f.z>=1.'];
+const TL_FS=k=>`{ vec2 q=floor(gl_FragCoord.xy)+vec2(19.,43.); float n=fract(52.9829189*fract(dot(q,vec2(.06711056,.00583715))));
+  if(!(${k}))discard; }`;
+const tlRoot=lod=>lod<2?'instanceMatrix[3].xz':'bqRoot.xy';
+function treeMat(leaf,lod){
+  const m=foliageShader(G.toon('#ffffff',{vertexColors:true}),{leaf}), fol=m.onBeforeCompile;
+  m.onBeforeCompile=(sh,r)=>{
+    Object.assign(sh.uniforms,TL.u);
+    // one sway for every level (the same field in world space), so the levels overlap exactly while they dissolve
+    sh.vertexShader=TL_VS+'\n'+(lod<2?'':'attribute vec3 bqRoot;\n')+sh.vertexShader.replace('#include <project_vertex>',`vec4 mvPosition=${lod<2?'instanceMatrix*':''}vec4(transformed,1.);
+  { vec2 ip=${tlRoot(lod)}; float k=clamp(${lod<2?'transformed.y':'bqRoot.z'}/9.,0.,1.35); k*=k;
+    ${leaf?`#ifndef BQ_LQ
+    float fl=sin(uTime*3.3+dot(mvPosition.xyz,vec3(2.1,1.7,2.9))+ip.x)*.045*k; mvPosition.xyz+=vec3(fl,fl*.6,-fl);
+    #endif`:''}
+    mvPosition.xz+=bqTreeWind(ip)*k; }
+  mvPosition=modelViewMatrix*mvPosition;
+  gl_Position=projectionMatrix*mvPosition;
+  { vec3 f=bqTreeFade(${tlRoot(lod)}); vTF=f; if(${TL_GONE[lod]})gl_Position=vec4(0.,0.,-2.,1.); }`);
+    fol(sh,r);
+    sh.fragmentShader='varying vec3 vTF;\n'+sh.fragmentShader.replace('void main() {','void main() {\n'+TL_FS(TL_KEEP[lod]));
+  };
   if(leaf)G.nearFade(m,1.8,5.5); else G.nearFade(m,1.4,4.2);
-  const prev=m.onBeforeCompile;
-  m.onBeforeCompile=(sh,r)=>{ prev(sh,r); sh.uniforms.uLodC=TL.u;
-    const at='mvPosition=modelViewMatrix*mvPosition;\n  gl_Position=projectionMatrix*mvPosition;';
-    if(sh.vertexShader.indexOf(at)<0){ console.warn('[trees] merged wind: shader anchor missing'); return; }
-    sh.vertexShader='attribute vec3 bqRoot;\nuniform vec3 uLodC;\n'+sh.vertexShader.replace(at,`{ float k=clamp(bqRoot.z/9.,0.,1.35); k*=k; mvPosition.xz+=bqTreeWind(bqRoot.xy)*k; }
-  ${at}
-  if(distance(bqRoot.xy,uLodC.xy)<uLodC.z)gl_Position=vec4(0.,0.,-2.,1.);`); };
-  m.customProgramCacheKey=()=>'bqTreeM'+key+(m.defines&&m.defines.BQ_LQ?'q':'');
+  m.customProgramCacheKey=()=>'bqTree'+lod+(leaf?'L':'T')+(m.defines&&m.defines.BQ_LQ?'q':'');
   FOL.mats.push(m); return m;
 }
-function buildTreeLOD(T,TK,mats){
+function treeDepth(lod){
+  const m=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});
+  m.onBeforeCompile=sh=>{ Object.assign(sh.uniforms,TL.u);
+    sh.vertexShader=TL_VS+'\n'+(lod<2?'':'attribute vec3 bqRoot;\n')+sh.vertexShader.replace('#include <project_vertex>',
+      `#include <project_vertex>\n  { vec3 f=bqTreeFade(${tlRoot(lod)}); vTF=f; if(${TL_DGONE[lod]})gl_Position=vec4(0.,0.,-2.,1.); }`);
+    sh.fragmentShader='varying vec3 vTF;\n'+sh.fragmentShader.replace('void main() {','void main() {\n'+TL_FS(TL_DKEEP[lod])); };
+  m.customProgramCacheKey=()=>'bqTreeD'+lod; return m;
+}
+function buildTreeLOD(T,TK){
   const forms=[...TK.oaks.map(f=>({f,kind:'oak'})),...TK.pines.map(f=>({f,kind:'pine'}))];
   const snag=TK.extras&&TK.extras.snag?forms.push({f:TK.extras.snag,kind:'snag'})-1:-1;
   const trees=[], tiles=new Map();
   const gather=(trunks,crowns,f0,kind)=>trunks.forEach((tt,v)=>{
     tt.o.collect=true; crowns[v].o.collect=true; tt.build(root); crowns[v].build(root);
     for(const [key,items] of crowns[v].t)for(const [m,c] of items){ const x=m.elements[12], z=m.elements[14];
-      const fi=kind==='oak'&&snag>=0&&x<-62&&_h1(x,z)<.06?snag:f0+v, tr={x,z,m,c,fi,band:-1};
+      const fi=kind==='oak'&&snag>=0&&x<-62&&_h1(x,z)<.06?snag:f0+v, tr={x,z,m,c,fi};
       trees.push(tr); if(!tiles.has(key))tiles.set(key,[]); tiles.get(key).push(tr); } });
   gather(T.oakT,T.oakC,0,'oak'); gather(T.pineT,T.pineC,TK.oaks.length,'pine');
+  const mats=[0,1,2].map(l=>({trunk:treeMat(false,l),canopy:treeMat(true,l),depth:treeDepth(l)}));
   // merged LOD2 per tile and part
-  const mT=mergedTreeMat(mats.trunk,false,'T'), mC=mergedTreeMat(mats.leaf,true,'L'), far=[], _n3=new THREE.Matrix3(), cc=new THREE.Color();
+  const far=[], _n3=new THREE.Matrix3();
   let farTris=0;
-  const depth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); // shadows: the merged trees leave out the pooled ones too
-  depth.onBeforeCompile=sh=>{ sh.uniforms.uLodC=TL.u; sh.vertexShader='attribute vec3 bqRoot;\nuniform vec3 uLodC;\n'+sh.vertexShader.replace('#include <project_vertex>',
-    '#include <project_vertex>\n  if(distance(bqRoot.xy,uLodC.xy)<uLodC.z)gl_Position=vec4(0.,0.,-2.,1.);'); };
-  depth.customProgramCacheKey=()=>'bqTreeD';
   for(const [key,list] of tiles)for(const part of ['trunk','canopy']){
     let nv=0, ni=0; for(const t of list){ const g=forms[t.fi].f[part]; if(!g)continue; nv+=g[2].attributes.position.count; ni+=g[2].index.count; }
     if(!ni)continue;
@@ -346,39 +374,55 @@ function buildTreeLOD(T,TK,mats){
     g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.BufferAttribute(nor,3));
     g.setAttribute('color',new THREE.BufferAttribute(col,3)); g.setAttribute('bqRoot',new THREE.BufferAttribute(rt,3));
     g.setIndex(new THREE.BufferAttribute(nv>65535?idx:new Uint16Array(idx),1)); g.computeBoundingSphere();
-    const me=new THREE.Mesh(g,part==='trunk'?mT:mC); me.customDepthMaterial=depth; me.castShadow=true; me.receiveShadow=true; me.userData.bqTreeMesh=true; me.name='trees'+(part==='trunk'?'T':'C');
+    const me=new THREE.Mesh(g,mats[2][part]); me.customDepthMaterial=mats[2].depth; me.castShadow=true; me.receiveShadow=true; me.userData.bqTreeMesh=true; me.name='trees'+(part==='trunk'?'T':'C');
     root.add(me); far.push(me); farTris+=ni/3; }
   // per-form pools for LOD0 and LOD1
   const pools=[];
   forms.forEach((F,fi)=>{ const n=trees.filter(t=>t.fi===fi).length; if(!n)return;
     for(const lod of [0,1])for(const part of ['trunk','canopy']){ const g0=F.f[part]&&F.f[part][lod]; if(!g0)continue;
       const g=new THREE.BufferGeometry(); for(const k in g0.attributes)g.setAttribute(k,g0.attributes[k]); g.setIndex(g0.index);
-      const im=new THREE.InstancedMesh(g,part==='trunk'?mats.trunk:mats.leaf,n);
+      const im=new THREE.InstancedMesh(g,mats[lod][part],n); im.customDepthMaterial=mats[lod].depth;
       if(part==='canopy')im.setColorAt(0,_c.setRGB(1,1,1)); // (sizes the colour buffer: before count drops to 0)
       im.count=0; im.visible=false;
       im.castShadow=true; im.receiveShadow=true; im.frustumCulled=true; im.userData.bqTreeMesh=true; im.name='treePool';
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); root.add(im); pools.push({im,fi,lod,part,bs:g0.boundingSphere}); } });
-  const ref={x:1e9,z:1e9,level:''}, box=new THREE.Box3();
+  const byKey=new Map(); for(const p of pools)byKey.set(p.fi*4+p.lod*2+(p.part==='trunk'?0:1),p);
+  const ref={x:1e9,z:1e9,cx:1e9,cz:1e9,fx:0,fz:0,fy:0,level:'',asp:0,half:0}, cam=G.camera, fw=new THREE.Vector3();
+  // half the view's width on the ground plane, around the camera's level heading (wider when it looks up or down)
+  const viewHalf=()=>{ cam.getWorldDirection(fw); const h=Math.hypot(fw.x,fw.z), lo=h-Math.abs(fw.y)*Math.tan(cam.fov*Math.PI/360);
+    return lo<.05?Math.PI:Math.atan(Math.tan(cam.fov*Math.PI/360)*cam.aspect/lo); };
   TL.update=(force)=>{
-    const f=G.focus, lv=G.quality.level, R=TLOD[lv]||TLOD.balanced;
-    if(!force&&ref.level===lv&&Math.hypot(f.x-ref.x,f.z-ref.z)<TLOD_STEP)return;
-    ref.x=f.x; ref.z=f.z; ref.level=lv; TL.u.value.set(f.x,f.z,R[1]);
+    const f=G.focus, lv=G.quality.level, B=TLOD[lv]===undefined?TLOD.balanced:TLOD[lv], U=TL.u;
+    U.uTF.value.set(f.x,f.z,0,0);
+    if(B)U.uTB.value.set(B[0]-B[1]/2,B[1],B[2]-B[3]/2,B[3]); else U.uTB.value.set(-9,1,-9,1);
+    cam.updateMatrixWorld(); const half=viewHalf(), h=Math.hypot(fw.x,fw.z)||1, cx=cam.position.x, cz=cam.position.z;
+    U.uTV.value.set(cx,cz,fw.x/h,fw.z/h);
+    const vh=half+.05; if(half>=Math.PI-1e-3)U.uTV2.value.set(9,10,TL_R,0); else U.uTV2.value.set(vh,vh+.1,TL_R,0);
+    if(!force&&ref.level===lv&&Math.hypot(f.x-ref.x,f.z-ref.z)<TL_STEP&&Math.hypot(cx-ref.cx,cz-ref.cz)<TL_CAM&&
+      (fw.x/h)*ref.fx+(fw.z/h)*ref.fz>Math.cos(TL_TURN)&&Math.abs(half-ref.half)<.05)return;
+    Object.assign(ref,{x:f.x,z:f.z,cx,cz,fx:fw.x/h,fz:fw.z/h,level:lv,half});
+    const t0=performance.now(), wide=half+TL_MARG, cw=Math.cos(Math.min(wide,Math.PI));
     for(const p of pools)p.n=0;
-    const byKey=new Map(); for(const p of pools)byKey.set(p.fi*4+p.lod*2+(p.part==='trunk'?0:1),p);
-    let n0=0,n1=0;
-    for(const t of trees){ const d=Math.hypot(t.x-f.x,t.z-f.z); t.band=d<R[0]?0:d<R[1]?1:2; if(t.band===2)continue;
-      if(t.band===0)n0++; else n1++;
-      for(const part of [0,1]){ const p=byKey.get(t.fi*4+t.band*2+part); if(!p)continue;
-        p.im.setMatrixAt(p.n,t.m); if(part&&t.c)p.im.setColorAt(p.n,t.c); p.n++; } }
+    let n0=0,n1=0,nm=0;
+    if(B){ const a0=B[0]-B[1]/2-TL_STEP, b0=B[0]+B[1]/2+TL_STEP, b1=B[2]+B[3]/2+TL_STEP;
+      for(const t of trees){ const d=Math.hypot(t.x-f.x,t.z-f.z); if(d>=b1)continue;
+        if(wide<Math.PI){ const vx=t.x-cx, vz=t.z-cz, l=Math.hypot(vx,vz); // in or near the view (with the tree's own width)
+          if(l>TL_R+1){ const an=Math.acos(Math.max(-1,Math.min(1,(vx*ref.fx+vz*ref.fz)/l)))-Math.asin((TL_R+1)/l); if(an>wide)continue; } }
+        if(d<b0||d>a0)nm++;
+        for(const lod of [0,1]){ if(lod===0?d>=b0:d<=a0)continue; lod?n1++:n0++;
+          for(const part of [0,1]){ const p=byKey.get(t.fi*4+lod*2+part); if(!p)continue;
+            p.im.setMatrixAt(p.n,t.m); if(part&&t.c)p.im.setColorAt(p.n,t.c); p.n++; } } } }
     for(const p of pools){ const im=p.im; im.count=p.n; im.visible=p.n>0; if(!p.n)continue;
       im.instanceMatrix.needsUpdate=true; if(im.instanceColor)im.instanceColor.needsUpdate=true;
-      box.makeEmpty(); for(let i=0;i<p.n;i++){ im.getMatrixAt(i,_m4); _v.copy(p.bs.center).applyMatrix4(_m4); box.expandByPoint(_v); }
-      const sph=im.geometry.boundingSphere||new THREE.Sphere(); box.getBoundingSphere(sph); sph.radius+=p.bs.radius*1.5; im.geometry.boundingSphere=sph; }
-    TL.stats.near=n0; TL.stats.mid=n1; TL.stats.far=trees.length-n0-n1; TL.stats.level=lv; };
+      const a=im.instanceMatrix.array; let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9,z0=1e9,z1=-1e9;
+      for(let i=0;i<p.n;i++){ const x=a[i*16+12],y=a[i*16+13],z=a[i*16+14]; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; if(z<z0)z0=z; if(z>z1)z1=z; }
+      const sph=im.geometry.boundingSphere||(im.geometry.boundingSphere=new THREE.Sphere());
+      sph.center.set((x0+x1)/2,(y0+y1)/2+p.bs.center.y,(z0+z1)/2); sph.radius=Math.hypot(x1-x0,y1-y0,z1-z0)/2+p.bs.radius*1.5; }
+    TL.stats.near=n0; TL.stats.mid=n1; TL.stats.far=trees.length-nm; TL.stats.level=lv; TL.stats.ms=Math.round((performance.now()-t0)*100)/100; TL.stats.fills=(TL.stats.fills||0)+1; };
   TL.stats={trees:trees.length,forms:forms.length,tiles:tiles.size,farMeshes:far.length,farTris,pools:pools.length};
   TL.update(true);
   G.on('quality',()=>TL.update(true));
-  W.treeLOD={update:f=>TL.update(f),stats:TL.stats,trees,pools,far};
+  W.treeLOD={update:f=>TL.update(f),stats:TL.stats,trees,pools,far,bands:TLOD};
 }
 /* VIGIL (2/2) — the hollow's furniture (temple.js, Place agent; TEMPLE.md): a ring of leaning standing stones on the rim, a
    stone stair down its east bank, the door in a carved portal against the west bank (temple.js grows the ink roots in the
@@ -969,7 +1013,7 @@ function buildForest(){
    setting, and the wind uniforms */
 W.fol={shader:foliageShader,rim:rimShader,mats:FOL.mats,spherize,SH,wind:WIND_GLSL};
 function buildTreeTiles(){const T=W._treeTiles;
-  if(T.kit){ try{ buildTreeLOD(T,T.kit,T.mats); return; }catch(e){ console.error('tree kit',e); for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.o.collect=false; } }
+  if(T.kit){ try{ buildTreeLOD(T,T.kit); return; }catch(e){ console.error('tree kit',e); for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.o.collect=false; } }
   for(const t of [...T.oakT,...T.oakC,...T.pineT,...T.pineC])t.build(root);}
 
 /* ---------- rocks everywhere ---------- */
