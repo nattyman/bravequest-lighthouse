@@ -47,8 +47,7 @@ S_SLACK=r"""(()=>{ RT.prep(); const tl=+G.tide.level.toFixed(2); const lab=RT.lo
   return {ok:lab==='Set the lantern on the raft'&&r.state==='arrived'&&r.pushes===0&&r.runT>=25&&r.runT<=35&&r.r0,tide:tl,lab,...r,waves:RT.ev.filter(e=>e.n==='cave:raid').length}; })()"""
 S_PEAK=r"""(()=>{ RT.prep({tide:225}); G.step(1/30,2); const tl=+G.tide.level.toFixed(2); RT.load(); const r=RT.runNoHelp();
   return {ok:r.state==='arrived'&&r.pushes===0&&r.runT>=25&&r.runT<=35&&Math.abs(tl)<.3,tide:tl,...r}; })()"""
-S_PUSHED=r"""(()=>{ const DG={bolts:[],start:{tide:+G.tide.level.toFixed(3),t:+G.tide.t.toFixed(2),time:+G.time.toFixed(2)}}; const sp=G.combat.spawnProjectile; G.combat.spawnProjectile=function(p){ const r=sp.apply(this,arguments); if(p.kind==='bolt'){ const R=RT.R(), O=RT.O(), rec={rt:+R.runT.toFixed(2),lock:G.player.lockTarget?(G.player.lockTarget.raft?'raft':G.player.lockTarget.name):null,raft:[+(R.pos.x-O.x).toFixed(2),+(R.pos.y-O.y).toFixed(2),+(R.pos.z-O.z).toFixed(2)],from:[+(p.pos.x-O.x).toFixed(2),+(p.pos.y-O.y).toFixed(2),+(p.pos.z-O.z).toFixed(2)],raiders:RT.raiders().length,hit:null,end:null};
-   const oh=p.onHit, oe=p.onEnd; p.onHit=function(h){ rec.hit=(h&&(h.raft?'raft':h.name))||'?'; return oh&&oh.apply(this,arguments); }; p.onEnd=function(q){ rec.end=[+(q.pos.x-O.x).toFixed(2),+(q.pos.y-O.y).toFixed(2),+(q.pos.z-O.z).toFixed(2),+q.life.toFixed(2),+(G.floorAt(q.pos.x,q.pos.z,q.pos.y+1)-O.y).toFixed(2),RT.raiders().length,R.state]; return oe&&oe.apply(this,arguments); }; DG.bolts.push(rec); } return r; };
+S_PUSHED=r"""(()=>{
   // No boarding waves here: this is the push alone. (A wave's crab gripping the edge mid-charge makes the raft untargetable, the lock
   // drops and that bolt flies wide: how many of the run's 15 or so bolts that happened to varied with how the waves fell against the
   // shots, 8 to 10 pushes, a run of 21-23 s against a 23 s bar. Raiders and bolts together are the cave suite's raftRun.)
@@ -65,7 +64,7 @@ S_PUSHED=r"""(()=>{ const DG={bolts:[],start:{tide:+G.tide.level.toFixed(3),t:+G
     RT.follow(); G.step(1/30,1); n++; T.top(); }
   T.release();
   // every bolt loosed locked on the raft lands (bar one still in the air as it arrives)
-  G.combat.spawnProjectile=sp; return {ok:R.state==='arrived'&&R.pushes>=3&&R.pushes>=onRaft-1&&R.runT<23,runT:+R.runT.toFixed(1),pushes:R.pushes,shots,lockedOnRaft:onRaft,DIAG:DG}; })()"""
+  return {ok:R.state==='arrived'&&R.pushes>=3&&R.pushes>=onRaft-1&&R.runT<23,runT:+R.runT.toFixed(1),pushes:R.pushes,shots,lockedOnRaft:onRaft}; })()"""
 S_RAIDER=r"""(()=>{ RT.prep(); RT.load(); const R=RT.R(), P=G.player; RT.toWalkway(); RT.reset();
   G.cavePuzzles.raid.wave=9; G.ui.clearCaptions&&G.ui.clearCaptions();                // only our crab
   const m=RT.D().spawnRaider(1); const out={};
@@ -157,10 +156,7 @@ async def main():
             except Exception as e: r={'ok':False,'exc':str(e).split('\n')[0][:300]}
             ok=bool(r.get('ok')) if isinstance(r,dict) else False
             if not ok: fails.append(name)
-            dg=r.pop('DIAG',None) if isinstance(r,dict) else None
-            print(('PASS ' if ok else 'FAIL ')+name,':',json.dumps(r)[:900])
-            if dg is not None: print('DIAG '+name+' : '+json.dumps(dg)[:8000])
-            return r
+            print(('PASS ' if ok else 'FAIL ')+name,':',json.dumps(r)[:900]); return r
         await check('run:slack',S_SLACK)
         await check('run:peak',S_PEAK)
         await check('run:pushed',S_PUSHED)

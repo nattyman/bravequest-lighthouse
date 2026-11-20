@@ -139,11 +139,7 @@ return {keys,release,steer,walk,nav,where,tap,label,use,wait,swarm,near,states,u
 CAMCHECK=r"""
 window.NAN=window.NAN||[]; if(!console._nanHook){ const ce=console.error; console._nanHook=1; console.error=function(...a){ if(String(a[0]).includes('NaN')&&NAN.length<3)NAN.push(new Error().stack.split('\n').slice(2,8).join(' | ')); return ce.apply(console,a); }; }
 window.CAM={n:0,bad:[]}; G.system('camCheck',{order:99,modes:['play'],update(){ if(!G.cave.inside)return; const D=G.cave._debug, O=G.cave.origin, c=G.camera.position, x=c.x-O.x, y=c.y-O.y, z=c.z-O.z;
-  CAM.n++; const s=D.Sat(x,z), f=D.Fat(x,z), cc=D.Cat(x,z); const b=s>.02?'rock':y>cc+.02?'ceil':y<f-.12?'floor':''; /* .1: hurt / landing shake jitters the camera after it is placed */ if(b&&CAM.bad.length<50)CAM.bad.push([b,G.cave.room(G.player.pos),+x.toFixed(1),+y.toFixed(1),+z.toFixed(1)]);
-  if(b&&CAM.diag.length<12){ const P=G.player, pl=G.cave.toLocal(P.pos), q=CAM.last||{}; CAM.diag.push({cam:[+x.toFixed(2),+y.toFixed(2),+z.toFixed(2)],F:+f.toFixed(2),C:+cc.toFixed(2),S:+s.toFixed(2),pl:[+pl.x.toFixed(2),+pl.y.toFixed(2),+pl.z.toFixed(2)],plF:+D.Fat(pl.x,pl.z).toFixed(2),
-    p:q.p,c85:window.C85,t:q.t,tF:q.tF,tBad:q.tBad,w:+G.cave.water().toFixed(2),lock:!!P.lockTarget,gr:P.grounded,mode:G.state.mode,boss:G.caveBoss&&G.caveBoss.state}); } }});
-CAM.diag=[]; G.cameraConstrainers.push((cam,t)=>{ if(!G.cave.inside)return; const O=G.cave.origin, D=G.cave._debug, tx=t.x-O.x, ty=t.y-O.y, tz=t.z-O.z;
-  CAM.last={p:[+(cam.x-O.x).toFixed(2),+(cam.y-O.y).toFixed(2),+(cam.z-O.z).toFixed(2)],t:[+tx.toFixed(2),+ty.toFixed(2),+tz.toFixed(2)],tF:+D.Fat(tx,tz).toFixed(2),tBad:D.Sat(tx,tz)>-.24||ty>D.Cat(tx,tz)-.34||ty<D.Fat(tx,tz)+.4||(ty<G.cave.water()+.18&&D.Fat(tx,tz)<G.cave.water())}; }); 'cam'
+  CAM.n++; const s=D.Sat(x,z), f=D.Fat(x,z), cc=D.Cat(x,z); const b=s>.02?'rock':y>cc+.02?'ceil':y<f-.12?'floor':''; /* .1: hurt / landing shake jitters the camera after it is placed */ if(b&&CAM.bad.length<50)CAM.bad.push([b,G.cave.room(G.player.pos),+x.toFixed(1),+y.toFixed(1),+z.toFixed(1)]); }}); 'cam'
 """
 
 STEPS=[
@@ -255,18 +251,15 @@ STEPS=[
  ("raftRun", r"""(()=>{ const R=G.cavePuzzles.raft, O=G.cave.origin; const log=[]; let shots=0, page=null, pageTries=0, steps=0, boarded=0, gripped=0, knocked=0;
    G.on('brineling:board',()=>boarded++); G.on('brineling:grip',()=>gripped++); G.on('brineling:knocked',()=>knocked++);
    const r0=T.walk([[0,-82.5],[-6,-83.4],[-10,-85],[-10,-86],[-3,-86],[4,-86]],{local:true,sprint:true});
-   const sw0=T.swarm(), at0=+R.runT.toFixed(1); const DG={hurt:[],drop:null,pageTry:[],cv:[]}; let what='walk';
-   G.on('player:hurt',e=>{ if(DG.hurt.length<20)DG.hurt.push([+R.runT.toFixed(1),e.kind,e.damage,what,T.where().slice(1,4).join(',')]); });
-   G.on('cave:splash',e=>{ if(DG.cv.length<20)DG.cv.push(['splash',+R.runT.toFixed(1),!!(e&&e.deep),what,T.where().slice(1,4).join(',')]); });
-   const chk=()=>{ const l=G.cave.toLocal(G.player.pos); if(!DG.drop&&l.y<3)DG.drop=[+R.runT.toFixed(1),what,T.where()]; };
-   while(R.state!=='arrived'&&R.state!=='done'&&steps<2400){ chk();
+   const sw0=T.swarm(), at0=+R.runT.toFixed(1);
+   while(R.state!=='arrived'&&R.state!=='done'&&steps<2400){
      const tx=Math.min(R.pos.x-O.x,44.5)-1, px=G.player.pos.x-O.x;
      // crabs gripping the edge or aboard: a charged bolt from the walkway, once you're alongside (stood bolting from far behind, the bot
      // fell 20 m back on a run with many raiders, and the page halfway along went by unread)
      const b=G.monsters.list.filter(m=>m.alive&&!m.dying&&m.raid&&Math.abs(m.pos.x-O.x-px)<8);
-     if(b.length){ what='bolt:'+b[0].state; T.bolt(b[0]); shots++; steps+=46; chk(); what='follow'; continue; }
+     if(b.length){ T.bolt(b[0]); shots++; steps+=46; continue; }
      // (T.use answers 'NOPE:<what was offered>' when the prompt isn't the page: that used to count as read, and the page went by unread)
-     if(page!=='Read the page'&&pageTries<4&&Math.abs(px-31)<1.5){ what='page'; pageTries++; T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); DG.pageTry.push([+R.runT.toFixed(1),page,T.where().slice(1,4).join(',')]); chk(); what='follow'; continue; }
+     if(page!=='Read the page'&&pageTries<4&&Math.abs(px-31)<1.5){ pageTries++; T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); continue; }
      if(Math.abs(tx-px)>1.2)T.steer(tx+O.x,O.z-86.1); else T.keys(new Set());
      G.step(1/30,1); steps++; T.top();
      if(steps%150===0)log.push([+R.runT.toFixed(1),+R.t.toFixed(2),R.moths,T.swarm(),R.raiders|0].join('/')); }
@@ -274,9 +267,9 @@ STEPS=[
    if(page!=='Read the page'&&G.cave.toLocal(G.player.pos).x<31){ T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); }   // still behind it: the page on the way
    // and on up the walkway to the raft at the gate (by a found path: past x 41 a lip of rock runs outside the rail, and a bot that has
    // wandered out onto it while shooting can't cross back in a straight line)
-   what='nav'; DG.beforeNav=T.where(); const nv=T.nav(Math.min(R.pos.x-O.x,44.5)-1,-86.1,{max:600}); DG.nav=nv; chk();
+   const nv=T.nav(Math.min(R.pos.x-O.x,44.5)-1,-86.1,{max:600});
    // ending up there is part of the run: the sluice check after this one hooks the lantern back from the walkway beside the raft
-   return {DIAG:DG,ok:r0.ok&&nv.ok&&(R.state==='arrived'||R.state==='done')&&page==='Read the page'&&G.caveBoss.pages.includes(2)&&T.swarm()>=G.cavePuzzles.seals.channel.needs
+   return {ok:r0.ok&&nv.ok&&(R.state==='arrived'||R.state==='done')&&page==='Read the page'&&G.caveBoss.pages.includes(2)&&T.swarm()>=G.cavePuzzles.seals.channel.needs
        &&gripped>=3&&boarded>=1&&knocked>=1&&shots>=1&&runT<=35&&(pushes>0||runT>=25),
      runT,pushes,atWalkway:at0,gripped,boarded,knocked,shots,page,nav:nv.ok?undefined:nv,swarmStart:sw0,swarm:T.swarm(),lost:T.losses.channel||0,log,pages:G.caveBoss.pages,at:T.where()}; })()"""),
  ("sluice", r"""(()=>{ const s=G.cavePuzzles.seals.channel; const t=T.wait(20,{until:()=>s.cured}); T.wait(3);
@@ -287,11 +280,10 @@ STEPS=[
      seal:s.cured?undefined:{progress:+s.progress.toFixed(2),credit:+(s.credit||0).toFixed(2),feeding:s.feeding,sated:s.sated,fed:s.fed&&s.fed.size,near:st,raft:[R.state,+R.t.toFixed(3),R.moths,!!R.lantern],at:T.where(),mode:G.state.mode,pauseMenu:!document.getElementById('pause').hidden,talk:!!G.talk.isOpen}}; })()"""),
  ("shot:channel-lit",None),
  # ---------------------------------------------------------------- the hall of drafts
- ("drafts", r"""(()=>{ window._dl=[]; if(!window._dlh){ window._dlh=1; G.on('moths:lost',e=>{ if(window._dl&&window._dl.length<40)window._dl.push([G.cave.room(G.player.pos),+G.time.toFixed(1),e.n,e.by||'',T.where().slice(1,4).join(',')]); }); }
-   const r0=T.nav(46,-86.3,{max:600}), r=r0.ok?T.walk([[52,-86.5]],{local:true}):r0; const L=G.items.lantern; if(!L.shut)T.tap('shutter',3); const shut=L.shut;
+ ("drafts", r"""(()=>{ const r0=T.nav(46,-86.3,{max:600}), r=r0.ok?T.walk([[52,-86.5]],{local:true}):r0; const L=G.items.lantern; if(!L.shut)T.tap('shutter',3); const shut=L.shut;
    const f=T.fight({room:'drafts',max:2400,r:45,threats:true}); // shy crabs with nothing to hunt are left alone, like a player would
    const r2=T.walk([[58,-86.3],[60,-80]],{local:true});
-   return {ok:r.ok&&r2.ok&&shut&&f.left===0&&T.swarm()>=20,shut,fight:f,r2,swarm:T.swarm(),lost:T.losses.drafts||0,hud:T.hud(),DIAG:{loss:window._dl}}; })()"""),
+   return {ok:r.ok&&r2.ok&&shut&&f.left===0&&T.swarm()>=20,shut,fight:f,r2,swarm:T.swarm(),lost:T.losses.drafts||0,hud:T.hud()}; })()"""),
  ("shot:drafts-dark",None),
  ("gusts", r"""(()=>{ const L=G.items.lantern, gust=G.cavePuzzles.gust; let bursts=0, killedInGust=0; const lost0=G.moths.lost;
    // the gusts' own count of the swarm moths they took (moths:lost can't tell them apart: a crab's bite over a vent mid-burst, or any
@@ -300,18 +292,16 @@ STEPS=[
    const seen=()=>{ if(gust.phase==='burst'&&!seen.b){ seen.b=1; bursts++; } if(gust.phase!=='burst')seen.b=0; };
    if(!L.shut)T.tap('shutter',3);
    if(G.cave.room(G.player.pos)!=='drafts')return {ok:false,why:'not in the hall of drafts (the gusts only run there)',at:T.where()};
-   const DG={loss:[],legs:[]}; let ctx='start'; G.on('moths:lost',e=>{ if(DG.loss.length>=40)return; const pp=G.player.pos; const cr=G.monsters.list.filter(m=>m.alive&&!m.dying&&m.kind==='brineling').map(m=>[m.state,+m.pos.distanceTo(pp).toFixed(1)]).sort((a,b)=>a[1]-b[1]).slice(0,3);
-     DG.loss.push([ctx,+G.time.toFixed(1),e.n,e.by||'',gust.phase,JSON.stringify(cr),T.where().slice(1,4).join(',')]); });
    for(const [x,z] of [[60,-72],[60,-62],[60,-54],[60,-46],[60,-42]]){
      // (a crab that comes for the swarm while you wait for the gap is fought off, as a player would: stood still with it eating at
      // arm's length, the wait for a quiet gap cost up to 8 moths, and the door seal further on needs 20)
      const threat=()=>G.monsters.list.some(m=>m.alive&&!m.dying&&!/idle|return|wander/.test(m.state)&&m.pos.distanceTo(G.player.pos)<9&&G.cave.toLocal(m.pos).y>G.cave.water()-.9);
-     ctx='wait'+z; let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ if(threat()){ ctx='waitFight'+z; const f=T.fight({r:9,max:300,threats:true,each:seen}); w+=Math.max(1,f.steps); ctx='wait'+z; continue; } G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
+     let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ if(threat()){ const f=T.fight({r:9,max:300,threats:true,each:seen}); w+=Math.max(1,f.steps); continue; } G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
      if(w>=900)return {ok:false,why:'no quiet gap between gusts in 30 s',gust:{phase:gust.phase,next:gust.next},at:T.where()};
-     ctx='fight'+z; const ff=T.fight({r:9,max:600,threats:true}); ctx='walk'+z; const ww=T.walk([[x,z]],{local:true,each:seen}); DG.legs.push([z,w,ff.steps,ff.left,ww.steps,T.swarm()]); if(z===-54&&!window._gustShot){ window._gustShot=1; } }
-   ctx='end'; const sw=T.swarm(); killedInGust=gust.lost-gl0;
+     T.fight({r:9,max:600,threats:true}); T.walk([[x,z]],{local:true,each:seen}); if(z===-54&&!window._gustShot){ window._gustShot=1; } }
+   const sw=T.swarm(); killedInGust=gust.lost-gl0;
    return {ok:L.shut&&bursts>=3&&killedInGust===0&&sw>=20&&G.cave.room(G.player.pos)==='drafts',bursts,killedInGust,swarm:sw,at:T.where(),
-     eaten:(T.losses.drafts||0),bait:Math.round(G.moths.baitLeft),ichor:G.inv.count('ichor'),states:T.states(),baitEnds:window._baitEnds||0,DIAG:DG}; })()"""),
+     eaten:(T.losses.drafts||0),bait:Math.round(G.moths.baitLeft),ichor:G.inv.count('ichor'),states:T.states(),baitEnds:window._baitEnds||0}; })()"""),
  ("shot:gust-crossing",None),
  ("draftsLight", r"""(()=>{ T.tap('shutter',3); const r=T.walk([[57,-58],[56.8,-61.8]],{local:true}); const lab=T.label(); const u=T.use(/vein/i); T.wait(1);
    return {ok:!G.items.lantern.shut&&G.cave.isLit('drafts')&&G.alchemy.etherUnits===0,lab,ether:G.alchemy.etherUnits,swarm:T.swarm()}; })()"""),
@@ -399,16 +389,13 @@ STEPS=[
    const r2=T.walk([[40,73]],{max:3000});
    return {ok:/Release|Capture/.test(u)&&/Capture/.test(c)&&G.moths.jar.count>=44&&r2.ok,patch:[Math.round(p.x),Math.round(p.z)],r,swarm:sw,jar:G.moths.jar.count,r2}; })()"""),
  ("cureWithJar", r"""(()=>{ const b=G.blights.find(x=>x.id==='tidepool'); T.walk([[b.pos.x+2.5,b.pos.z]],{max:600}); const lab=T.label();
-   const DG={pre:{st:T.states(),jar:G.moths.jar.count,bait:+G.moths.baitLeft.toFixed(1),freed:+G.moths.jar.freedLeft.toFixed(1),shut:G.items.lantern.shut,carried:G.items.lantern.carried,lost:G.moths.lost,mode:G.state.mode,time:+G.time.toFixed(1),dark:+(G.atmo.dark||0).toFixed(2),tide:+G.tide.level.toFixed(2),
-     at:T.where(),blight:[+b.pos.x.toFixed(1),+b.pos.y.toFixed(1),+b.pos.z.toFixed(1)],mons:G.monsters.list.filter(m=>m.alive&&m.pos.distanceTo(G.player.pos)<25).map(m=>m.kind+':'+m.state+':'+m.pos.distanceTo(G.player.pos).toFixed(1))},tl:[]};
-   const lostEv=[]; G.on('moths:lost',e=>lostEv.push([+G.time.toFixed(2),e.n,e.by||'',e.snatch?1:0]));
-   // (T.use answers 'NOPE:<what was offered>' when another prompt or none is up, a hollow on top of you, say: then the jar stayed
-   // corked, and the check went on fighting for a minute and a half with nothing to feed the pool. Uncork it again, like a player would)
-   const uses=[]; let u=T.use(/Release/); uses.push(u); for(let i=0;i<6;i++){ T.wait(1/6); DG.tl.push(JSON.stringify(T.states())); } const sw=T.swarm(); DG.lostEv=lostEv.slice(0,20); DG.lost1=G.moths.lost; DG.freed1=+G.moths.jar.freedLeft.toFixed(1);
+   // (T.use answers 'NOPE:<what was offered>' when another prompt or none is up, a hollow on top of you, say: then the jar stays
+   // corked, and the check used to fight on for its whole budget with nothing to feed the pool. Uncork it again, like a player would)
+   const uses=[]; let u=T.use(/Release/); uses.push(u); T.wait(1); const sw=T.swarm();
    let t=0; const fights=[]; while(!b.cured&&t<3600){ const f=T.fight({r:14,max:300}); if(f.steps)fights.push(f.steps); T.walk([[b.pos.x+2.5,b.pos.z]],{max:300});
      if(G.moths.jar.count>0&&uses.length<5){ u=T.use(/Release/); uses.push(u); } T.wait(1); t+=30+f.steps; }
    T.wait(3);
-   return {ok:/Release/.test(u)&&b.cured,lab,uses,released:sw,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm(),DIAG:DG}; })()"""),
+   return {ok:/Release/.test(u)&&b.cured,lab,uses,released:sw,jar:G.moths.jar.count,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm()}; })()"""),
  ("shot:blight-cured",None),
  # ---------------------------------------------------------------- camera random walk + draw calls
  ("cameraWalk", r"""(()=>{ const D=G.cave._debug, O=G.cave.origin, cv=document.querySelector('canvas'); const rng=G.U.rng(4242);
@@ -419,7 +406,7 @@ STEPS=[
        if(ok)T.walk([[x,z]],{local:true,max:240,patience:40,each:()=>{ frames++; if(frames%9===0)look((rng()-.5)*160,(rng()-.5)*60); }}); } }
    window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
    const bad=CAM.bad.length;
-   return {ok:bad===0,frames:CAM.n-n0,allFrames:CAM.n,bad,first:JSON.stringify(CAM.bad.slice(0,6)),DIAG:CAM.diag}; })()"""),
+   return {ok:bad===0,frames:CAM.n-n0,allFrames:CAM.n,bad,first:JSON.stringify(CAM.bad.slice(0,6))}; })()"""),
  # ---------------------------------------------------------------- lock-on after a kill (playtest: "first crab locked on, then it
  # wouldn't let me aim at the others"): the lock used to drop when its target died, and the stick held to strafe round it became a
  # run to the side, so the next swings went off left/right. Now it hops to the nearest living foe in front of the camera.
@@ -694,11 +681,7 @@ async def main():
                     broken=name
                     try: await pg.evaluate('G.headless&&G.headless.draw(3); 0'); await pg.wait_for_timeout(250); await pg.screenshot(path=f'{SHOTS}/FAIL-{name}.png',timeout=60000)
                     except Exception: pass
-            dg=r.pop('DIAG',None) if isinstance(r,dict) else None
             print(('PASS ' if ok else 'FAIL ')+name,':',json.dumps(r)[:900])
-            if dg is not None: print('DIAG '+name+' : '+json.dumps(dg)[:6000])
-            try: print('  SW',name,await pg.evaluate("[typeof T!=='undefined'?T.swarm():-1,G.moths.lost,+G.time.toFixed(1),+G.tide.level.toFixed(2)]"))
-            except Exception: pass
         try:
             if not SOFT_ONLY: await run(STEPS)
             # the soft-lock guards, in a fresh session (see SOFTLOCK)
