@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c1520">
+<meta name="robots" content="noindex">
+<title>Privacy · Brave Quest: Lighthouse</title>
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
+<link rel="icon" href="icons/favicon.ico" sizes="48x48">
+<style>
+:root{--ink:#1c1520;--parch:#efe4cc;--parch-2:#e2d3b3;--bone:#f1e9d8;--ether:#a56cff;
+  --display:"IM Fell English SC","IM Fell English","Iowan Old Style",Georgia,serif;
+  --serif:"IM Fell English","Iowan Old Style",Georgia,serif;
+  --body:"Alegreya Sans","Segoe UI",system-ui,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+html{background:#141019}
+body{margin:0;min-height:100vh;font-family:var(--body);color:var(--bone);
+  background:radial-gradient(ellipse at 50% -10%,rgba(108,63,95,.45),transparent 60%),linear-gradient(180deg,#1c1520,#141019 60%);
+  padding:calc(28px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px))}
+main{max-width:680px;margin:0 auto;display:grid;gap:18px;color:var(--ink);
+  background:linear-gradient(180deg,var(--parch),var(--parch-2));padding:30px 34px 28px;border-radius:3px;
+  box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(60,40,30,.25),inset 0 0 0 6px rgba(239,228,204,1),inset 0 0 0 7px rgba(60,40,30,.35)}
+.eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:#6c3f5f}
+h1{margin:0;font:400 clamp(40px,8vw,60px)/.95 var(--display);color:#21161f}
+h2{margin:6px 0 0;font:400 25px/1.1 var(--display);color:#21161f}
+p,li{font-size:17px;line-height:1.55;color:#3d2f33;max-width:62ch}
+p{margin:0}
+.lead{font-family:var(--serif);font-style:italic;font-size:19px;color:#3a262c}
+ul{margin:0;padding-left:1.2em;display:grid;gap:6px}
+li::marker{color:#6c3f5f}
+b{color:#21161f;font-weight:700}
+.rule{height:1px;background:linear-gradient(90deg,transparent,rgba(60,40,30,.45),transparent);margin:4px 0}
+a{color:#4b3863;text-decoration:none;border-bottom:1px dashed rgba(75,56,99,.6)}
+a:focus-visible{outline:2px solid var(--ether);outline-offset:3px}
+.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 18px;align-items:baseline;font-size:14px;color:#6c5a5f}
+.studio{font:500 12px var(--body);letter-spacing:.28em;text-transform:uppercase;color:#6c3f5f}
+@media (max-width:520px){ main{padding:24px 18px 22px;gap:16px} p,li{font-size:16.5px} h2{font-size:23px} }
+</style>
+</head>
+<body>
+<main>
+  <span class="eyebrow">Brave Quest · Lighthouse beta</span>
+  <h1>Privacy</h1>
+  <p class="lead">What the game keeps about you, and why. It’s short, because we keep little.</p>
+
+  <h2>Playing as a guest</h2>
+  <p>You don’t need an account to play. As a guest your game is saved in this browser. Unless you turn it off under
+    <b>Sync devices</b>, a copy of that save is also kept on our save service after a minute of play, under a short sync code,
+    so you can carry on from another device. No name or email address goes with it.</p>
+
+  <h2>What an account keeps</h2>
+  <ul>
+    <li><b>Your email address</b>, to sign you in.</li>
+    <li><b>Your saves</b>: up to ten save slots, each with a short summary (where you are, time played, how much is complete).</li>
+    <li><b>Your play statistics</b>: time played, the milestones you reach and when, boss fights, deaths, completion, badges and rank.
+      They make up your Keeper’s Record and your times on the Keepers’ Board.</li>
+    <li><b>A keeper name</b>, if you choose one, and a crew code if you join a crew.</li>
+    <li><b>The devices you’re signed in on</b>: a short label such as “Firefox on Windows” and when each was last used, so you can sign out everywhere.</li>
+    <li><b>A password</b>, only if you set one, and only in a scrambled one-way form that can’t be read back.</li>
+  </ul>
+
+  <h2>Why</h2>
+  <p>Your saves are kept so you can carry on from any device. Your play statistics fill your Record and the board, and show us
+    where players get stuck so we can make the game better. Your keeper name is how you appear on the board; without one you aren’t listed.</p>
+
+  <h2>Your email address</h2>
+  <p>It is used only to sign you in (an emailed link and a six-digit code) and for messages about your account: when your password
+    changes, and when your account is deleted. It is never shown to other players. The emails are sent through an email delivery service (Resend).</p>
+
+  <h2>Anonymous usage pings</h2>
+  <p>While you play, the game sends a few anonymous pings at points along the way (starting, beating a boss, a death and so on),
+    with the game’s version and whether you play with a keyboard, a controller or touch. They carry no name, no email address and
+    no account, only a random number that is forgotten when you close the game. If your browser asks sites not to track it (Do Not Track), none are sent.</p>
+
+  <h2>On this device</h2>
+  <p>The game keeps your save, your settings and any sync code in this browser’s storage. Signing in sets one cookie that keeps you
+    signed in for up to 60 days. There are no advertising or tracking cookies.</p>
+
+  <h2>Feedback</h2>
+  <p>If you use <b>Send feedback</b>, we get what you write, the game’s version, how you play (keyboard, controller or touch) and your
+    current objective, plus a way to reach you only if you add one.</p>
+
+  <h2>Deleting your account</h2>
+  <p>In the game, open <b>Account</b>, choose <b>Delete my account</b> and type DELETE to confirm. If you signed in a while ago, the game
+    asks you to sign in again first. This deletes your account for good: your email address, your save slots, your Record and board times,
+    your keeper name and your signed-in devices. One last email confirms it. Feedback you’ve sent and the anonymous pings aren’t tied to
+    your account, so they stay as they are. You can carry on playing as a guest.</p>
+
+  <h2>Who can have an account</h2>
+  <p>Accounts are for people 13 and over.</p>
+
+  <h2>A game in beta</h2>
+  <p>Brave Quest: Lighthouse is still in beta, so things change. If what we keep changes, this page changes with it.</p>
+
+  <h2>Get in touch</h2>
+  <p>A question, or something here that looks wrong? Use <b>Send feedback</b> in the game (on the title screen and in the pause menu),
+    and add your email address if you’d like a reply.</p>
+
+  <div class="rule"></div>
+  <div class="foot"><span class="studio">Numinex Studio</span><a href="./">Back to the game</a></div>
+</main>
+</body>
+</html>
