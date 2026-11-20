@@ -138,7 +138,7 @@ async def main():
         async def game(route):
             u = urlparse(route.request.url)
             try:
-                r = await route.fetch(url=BASE + u.path + ('?' + u.query if u.query else ''))
+                r = await route.fetch(url=BASE + u.path + ('?' + u.query if u.query else ''), timeout=60000)
                 await route.fulfill(response=r)
             except Exception:
                 try: await route.abort()
@@ -151,7 +151,9 @@ async def main():
             return ctx
         async def load(pg, reload=False):
             if reload: await pg.reload(wait_until='domcontentloaded')
-            else: await pg.goto(PAGE, wait_until='domcontentloaded')
+            else:
+                try: await pg.goto(PAGE, wait_until='domcontentloaded')
+                except Exception: await pg.goto(PAGE, wait_until='domcontentloaded')   # one more try: a slow runner can drop the first load
             await pg.wait_for_function("window.G&&G.state&&G.state.mode==='title'&&!document.getElementById('begin').disabled&&G.slots", timeout=240000)
             await pg.evaluate("G.account.ready"); await pg.wait_for_timeout(600)
             await pg.evaluate("G.slots.debug.gap(0)")
@@ -370,6 +372,12 @@ async def main():
             check('ownSlotsBack', s['acc'] == 'in' and [x['slot'] for x in s['list'] if x['used']][:2] == [1, 2] and s['tcont'], dict(acc=s['acc'], tcont=s['tcont'], info=s['info'], used=[x['used'] for x in s['list']]))
             await ctx.close()
         await step('twoAccounts', twoAccounts, ('keepAccount',))
+        # device 1 is done: close it so its running game doesn't starve the next devices on a 2-core machine
+        if W.get('pg') and W['pg'].errs: check('noPageErrors1', False, W['pg'].errs[:5])
+        if W.get('ctx'):
+            try: await W['ctx'].close()
+            except Exception: pass
+        W['pg'] = None
 
         # ---- device 2: a guest save with a sync code ----
         async def claimCode():
