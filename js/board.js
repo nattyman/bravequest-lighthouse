@@ -47,7 +47,9 @@ const code=()=>{ try{ const s=sync(); return s&&s.code?String(s.code()||'').repl
 const syncAvailable=()=>{ try{ const s=sync(); return !!(s&&s.available); }catch(_){ return false; } };
 /* Keeper Accounts (account.js loads after this file: always look it up when needed) */
 const acct=()=>G.account||null;
-const accountsOn=()=>{ const a=acct(); return !!(a&&a.on); };
+/* accounts in this build AND switched on at the service: with the service's accounts off (503 accounts_off) a guest names
+   themselves as before, so the board must not ask for an account then */
+const accountsOn=()=>{ const a=acct(); return !!(a&&a.on&&a.available!==false); };
 const signedIn=()=>{ const a=acct(); return !!(a&&a.on&&a.state==='in'&&a.me&&a.me.id); };
 const acctMe=()=>signedIn()?acct().me:null;
 /* whose board entry this device speaks for: the account when signed in, else the sync code ('' = nobody) */
@@ -374,7 +376,7 @@ function buildCard(){
       joinB.hidden=!on&&!c||guestAcc&&!s.name; lbl.hidden=joinB.hidden;
       signInB.hidden=!ask;
       notNow.hidden=editing; leaveB.hidden=!editing||!s.name;
-      jSent.textContent=sentText();
+      jSent.textContent=sentText(); jSent.hidden=ask;          // the sync small print is beside the point where a name needs an account
     }else if(view==='board'){
       who.innerHTML='';
       if(s.name&&c){ who.append('You’re on the board as '); who.appendChild(el('b',null,s.name)); who.append(s.crew?' in crew '+s.crew+'.':'.'); }

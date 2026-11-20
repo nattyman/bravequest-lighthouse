@@ -611,6 +611,17 @@ function ensureBuilt(){ if(!card)build(); else syncLinks(); }
 function note(t){ lastNote=t||''; if(noteEl)noteEl.textContent=lastNote; }
 function slotText(){
   const real=peekSave(G.flow?G.flow.keys.save:'bq-save-v1'), test=peekSave(G.flow?G.flow.keys.test:'bq-save-test-v1');
+  /* signed in to an account (js/slots.js): the game saves into an account save slot, not the guest save */
+  const SL=G.slots, signed=!!(SL&&SL.on&&G.account&&G.account.state==='in');
+  if(signed){
+    const a=SL.active&&SL.active(), nm=a&&a.name?esc(a.name):'';
+    if(G.testSaves||(a&&a.test)){
+      const where=a&&a.slot?'save slot '+a.slot+(nm?' ('+nm+')':'')+', marked Test':'a test slot on this device only';
+      return '<b>Test mode is on.</b> This session saves to '+where+'. Your other save slots are not touched. Reload the page to play normally again.';
+    }
+    if(a&&a.slot)return 'Using any tool here moves this session to a copy of save slot '+a.slot+(nm?' ('+nm+')':'')+' in a free slot, marked <b>Test</b>, so slot '+a.slot+' stays untouched.';
+    return 'Using any tool here plays in a save slot marked <b>Test</b>, so your other save slots stay untouched.';
+  }
   const r=real?'Your real save ('+esc(ago(real.at))+' · '+esc(real.objective||'')+')':'Your real save slot (empty)';
   if(G.testSaves)return '<b>Test mode is on.</b> This session saves to a separate test slot'+(test?' (last '+esc(ago(test.at))+')':'')+'. '+r+' is not touched. Reload the page to play normally again.';
   return 'Using any tool here switches this session to a separate <b>test save slot</b>, so '+r.charAt(0).toLowerCase()+r.slice(1)+' stays untouched.';

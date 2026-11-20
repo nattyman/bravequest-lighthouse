@@ -63,6 +63,10 @@ class Fake:
         if writes and acct and (h.get('x-bq-client') != '1' or origin != GAME): return await send(403, {'error': 'bad_origin'})
         if path == '/v1/me':
             if not acct: return await send(401, {'error': 'signed_out'})
+            if rq.method == 'DELETE':
+                for t in [t for t, e in self.sessions.items() if e == email]: self.sessions.pop(t)
+                self.slots[acct['id']] = {}; self.accounts.pop(email, None)
+                return await send(200, {'ok': True}, {'Set-Cookie': 'bq_s=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0'})
             return await send(200, self.me(acct))
         if path == '/v1/auth/signout':
             self.sessions.pop(cookie.get('bq_s', ''), None)
@@ -363,6 +367,7 @@ async def main():
             ctx = await context(); pg = await page(ctx)
             # device 1's storage is not shared with a new context, so copy A's cached slots in, then sign in as C
             store = await W['pg'].evaluate("JSON.stringify(Object.fromEntries(Object.keys(localStorage).map(k=>[k,localStorage.getItem(k)])))")
+            await W['ctx'].close()   # device 1 is done: one game page at a time (a second one can stall loading on a small runner)
             await ctx.add_init_script("if(!sessionStorage.getItem('copied')){ sessionStorage.setItem('copied','1'); const s=%s; for(const k in s)localStorage.setItem(k,s[k]); }" % store)
             await load(pg); W['pg2'] = pg; W['ctx2'] = ctx
             await signin(ctx, pg, C); s = await st(pg)
@@ -387,10 +392,14 @@ async def main():
             pg = await page(ctx); await load(pg)
             await signin(ctx, pg, B); await card(pg, 'claim'); s = await st(pg)
             check('claimOfferCode', s['card'] == 'claim' and 'sync code' in await pg.evaluate("document.querySelector('#slotsCard [data-view=claim] .sl-box').innerText"), s['card'])
+            n0 = len(fake.log)
             await click(pg, '#slClaimGo'); await settle(pg); await pg.wait_for_timeout(800); s = await st(pg)
             bid = fake.accounts[B]['id']; cl = fake.reqs('POST', '/v1/saves/claim')
             check('claimWithCode', cl and cl[-1]['b'] == {'code': CODE} and cl[-1]['cookie'] and CODE not in fake.guest and 1 in fake.slots[bid] and s['code'] is None and s['guest'] is None
                   and s['card'] == 'list' and 'slot 1' in s['note'] and not s['rows'][0]['empty'] and 'Coded guest game' in s['rows'][0]['text'], dict(note=s['note'], code=s['code'], row=s['rows'][0]))
+            await pg.wait_for_timeout(1500); s = await st(pg); v = await pg.evaluate("G.slots.debug.view(1)")
+            # the account's copy is the same save (same time): it counts as sent, so no "not sent" flag and no needless upload
+            check('claimedCountsAsSent', not v['unsent'] and 'not sent' not in s['rows'][0]['text'] and not fake.reqs('PUT', '/v1/saves/1', since=n0), dict(puts=len(fake.reqs('PUT', '/v1/saves/1', since=n0)), v={k: v[k] for k in ('unsent', 'la', 'sa')}, row=s['rows'][0]['text']))
             await ctx.close()
         await step('claimCode', claimCode, ('setup1',))
 
@@ -415,9 +424,36 @@ async def main():
             await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(1500); s = await st(pg)
             check('noFreeLocalTest', s['sess']['local'] and s['key'] == 'bq-save-test-v1' and 'No free save slot' in s['toast'] and not fake.reqs('PUT', since=n0)
                   and await pg.evaluate("!!localStorage.getItem('bq-save-test-v1')"), dict(sess=s['sess'], toast=s['toast']))
+            await ctx.close()
         await step('claimNoCode', claimNoCode, ('setup1',))
 
-        for pg in [W.get('pg'), W.get('pg3')]:
+        # ---- device 4: the service ends the session (title says so); then the account is deleted (nothing of it left here) ----
+        async def endedAndDeleted():
+            E = 'e@example.com'
+            ctx = await context(); pg = await page(ctx); await load(pg); W['pg4'] = pg
+            fake.put_slot(E, 1, guest_save('E game'))
+            await signin(ctx, pg, E); eid = fake.accounts[E]['id']
+            await click(pg, '#continue'); await settle(pg); await row(pg, 1); await play(pg)
+            await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(800)
+            async with pg.expect_navigation(wait_until='domcontentloaded', timeout=90000):
+                await pg.evaluate("document.getElementById('quitBtn').click()")
+            await pg.wait_for_function("window.G&&G.state&&G.state.mode==='title'&&!document.getElementById('begin').disabled&&G.slots", timeout=240000)
+            await pg.evaluate("G.account.ready"); await pg.wait_for_timeout(600)
+            for t in [t for t, e in fake.sessions.items() if e == E]: fake.sessions.pop(t)   # ended by the studio / elsewhere
+            await pg.evaluate("G.account.refresh()"); await pg.wait_for_timeout(600); s = await st(pg)
+            check('endedSaysSo', s['acc'] == 'out' and 'signed out of your account' in s['slotNote'] and await pg.evaluate("!document.getElementById('slotNote').hidden"), dict(acc=s['acc'], note=s['slotNote']))
+            await signin(ctx, pg, E); s = await st(pg)
+            check('endedNoteGoes', s['acc'] == 'in' and await pg.evaluate("document.getElementById('slotNote').hidden"), s['slotNote'])
+            keys0 = await pg.evaluate("id=>Object.keys(localStorage).filter(k=>k.endsWith('-'+id))", eid)
+            await pg.evaluate("G.account.open('title')"); await pg.wait_for_function("G.account.debug.view==='account'", timeout=30000)
+            await pg.evaluate("document.getElementById('acDelete').click()"); await pg.fill('#accountCard [name=confirm]', 'DELETE')
+            await pg.evaluate("document.getElementById('acDelGo').click()"); await pg.wait_for_function("G.account.state==='out'", timeout=30000); await pg.wait_for_timeout(500)
+            left = await pg.evaluate("id=>({keys:Object.keys(localStorage).filter(k=>k.endsWith('-'+id)), active:localStorage.getItem('bq-slot'), list:G.slots.list().length})", eid)
+            check('deletedLeavesNothing', keys0 and not left['keys'] and eid not in (left['active'] or '') and left['list'] == 0, dict(before=keys0, left=left))
+            await ctx.close()
+        await step('endedAndDeleted', endedAndDeleted, ('setup1',))
+
+        for pg in [W.get('pg'), W.get('pg3'), W.get('pg4')]:
             if pg and pg.errs: check('noPageErrors', False, pg.errs[:5])
         check('noUnknownRequests', not fake.other, fake.other[:10])
         await b.close()
