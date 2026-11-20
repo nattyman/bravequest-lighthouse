@@ -112,6 +112,14 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   (`G.progress.welcome` = `{due(save), show(save), close(), open, enabled, allowInTests}`; setting in the pause menu, localStorage `bq-welcome`);
   never in `?debug` / headless / test-save sessions unless a test sets `allowInTests`. The title's Continue card shows rank · time played ·
   completion from the stored save (`rec` in the save, written by flow.js's snapshot).
+- Test tools (js/devtools.js): `G.devtools` = `{open, cheats, starts, start(id), teleports, openPanel(), closePanel(), toggle(k), setSpeed(n), give(id),
+  spawn(kind), kill(), setTide(k), giveSwarm(n), gate, active, groups, can(group), undercroftHooks, templeHooks}`. `gate`: `'all'` in dev builds
+  (no `BQ_CONFIG`) and in a public build opened with `?debug`; `'roles'` in a public build with accounts (`G.DEVTOOLS_ROLES`, core.js: `BQ_CONFIG.devtools===false`
+  and `BQ_CONFIG.accounts===true`, with `G.account.on`), where `?debug` and the backquote key do nothing by themselves and the panel, its links and
+  its sections follow `G.account.can(group)` for the groups `start cheats give map teleport monsters` (re-read on `account:in` / `account:out` /
+  `account:me`); `'pending'` until `ready` in such a build; `'none'` if it has no accounts module and no `?debug`. `groups` lists what is shown now.
+  In a public build with accounts, `G.devtools` exists even for players (so modules can add teleports and start hooks); check `G.devtools.active`
+  before offering anything of your own.
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
 
 ## Events (names are fixed)

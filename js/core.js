@@ -13,6 +13,9 @@ G.PI=PI; G.TAU=TAU;
 /* DEVTOOLS: the one switch for the "Test tools" panel (js/devtools.js). false hides it, unless the URL has ?debug.
    While it's on, the test helpers other modules expose under G.debug (G.debugStartLoop, G.debugEnterCave, …) exist too. */
 G.DEVTOOLS=!(window.BQ_CONFIG&&window.BQ_CONFIG.devtools===false); // the public beta build turns it off (test/build_release.py)
+/* DEVTOOLS_ROLES: a public build with accounts (BQ_CONFIG.accounts===true): there ?debug no longer opens the panel; the signed-in
+   account's tool groups do (devtools.js, G.account.can). Spec: ACCOUNTS.md */
+G.DEVTOOLS_ROLES=!!(window.BQ_CONFIG&&window.BQ_CONFIG.devtools===false&&window.BQ_CONFIG.accounts===true);
 G.debugUrl=/[?&]debug/.test(location.search);
 G.debug=G.debugUrl||G.DEVTOOLS;
 G.timeScale=1; // devtools time speed: whole-number substeps per frame while playing
