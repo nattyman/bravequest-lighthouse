@@ -7,12 +7,33 @@
      From the title they apply straight away; mid-game the page reloads first so the state is clean.
    - Anything used here switches this session's saves to a separate test slot (bq-save-test-v1);
      the real save (bq-save-v1) is never written while test mode is on.
+   Who gets the tools (the "gate"):
+   - 'all'   dev builds (no BQ_CONFIG), and a public build without accounts opened with ?debug: everything, as always.
+   - 'roles' a public build with accounts on (G.DEVTOOLS_ROLES, and G.account present with accounts enabled): ?debug and the
+             backquote key do nothing by themselves. The tools exist only while the signed-in account has at least one tool
+             group (G.account.can), and the panel shows only those groups' sections:
+               start    Start from (every start point, Continue test save)
+               cheats   God mode, Easy test, Infinite stamina, Infinite ether, Show FPS, Time speed
+               give     items, recipes, swarm, jar, Heal, Progress, Tide, Captions
+               map      reveal / cover / open the map
+               teleport the island spots, the companions' spots, the cave rooms
+               monsters spawn, Kill nearby
+             Signing out or a role change updates the panel at once (closing it when nothing is left).
+             Spec: ACCOUNTS.md
+             Honest limit: the game's code is public, so this only hides the tools from players; anyone can still call them from
+             the browser console. It is not a lock. What keeps test sessions off the boards is the server, which refuses records
+             from test saves.
+   - 'none'  a public build with accounts switched on in the config but no accounts module running, and no ?debug.
    ===================================================================== */
 (function(){
 'use strict';
 const G=window.G, THREE=G.THREE, U=G.U, PI=Math.PI;
-const ENABLED=!!(G.DEVTOOLS||G.debugUrl);
-if(!ENABLED)return;
+const ROLES=!!G.DEVTOOLS_ROLES;
+if(!(G.DEVTOOLS||G.debugUrl||ROLES))return;
+const GROUPS=['start','cheats','give','map','teleport','monsters'];
+let gate=ROLES?'pending':'all', allowed=new Set();   // 'pending' until the 'ready' event, when every module (G.account too) has loaded
+const can=g=>gate==='all'||(gate==='roles'&&allowed.has(g));
+const active=()=>gate==='all'||(gate==='roles'&&allowed.size>0);
 const V=(x,y,z)=>new THREE.Vector3(x,y,z);
 const $=s=>document.getElementById(s);
 const LM=()=>(G.world&&G.world.landmarks)||{};
@@ -20,7 +41,8 @@ const BOOT_KEY='bq-devtools-boot';
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 const DT=G.devtools={open:false,cheats:{god:false,easy:false,stamina:false,ether:false,fps:false},starts:null,start:null,
-  get test(){return !!G.testSaves;}};
+  get test(){return !!G.testSaves;},
+  get gate(){return gate;}, get active(){return active();}, get groups(){return GROUPS.filter(can);}, can};
 
 /* ---------------------------------------------------------------- storage (sandboxed iframes may throw) */
 function stash(k,v){ for(const st of ['sessionStorage','localStorage']){ try{ window[st].setItem(k,JSON.stringify(v)); return st; }catch(_){} } return null; }
@@ -575,14 +597,31 @@ function build(){
   sheet.addEventListener('click',onClick);
   badgeEl=document.createElement('div'); badgeEl.id='dtBadge'; badgeEl.hidden=true; document.body.appendChild(badgeEl);
   fpsEl=document.createElement('div'); fpsEl.id='dtFps'; fpsEl.hidden=!DT.cheats.fps; fpsEl.setAttribute('aria-hidden','true'); document.body.appendChild(fpsEl);
-  // entry links on the title card and in the pause menu
-  for(const id of ['title','pause']){ const sh=$(id)&&$(id).querySelector('.sheet'), acts=sh&&sh.querySelector('.actions'); if(!acts)continue;
-    const d=document.createElement('div'); d.className='dt-entry'; d.innerHTML='<button type="button" data-dt-open>Test tools</button>';
-    acts.after(d); d.firstChild.addEventListener('click',()=>openPanel()); }
+  syncLinks();
 }
+/* entry links on the title card and in the pause menu: there while the tools are (always, outside 'roles') */
+function syncLinks(){
+  for(const id of ['title','pause']){ const sh=$(id)&&$(id).querySelector('.sheet'), acts=sh&&sh.querySelector('.actions'); if(!acts)continue;
+    const have=acts.parentNode.querySelector(':scope > .dt-entry');
+    if(active()&&!have){ const d=document.createElement('div'); d.className='dt-entry'; d.innerHTML='<button type="button" data-dt-open>Test tools</button>';
+      acts.after(d); d.firstChild.addEventListener('click',()=>openPanel()); }
+    else if(!active()&&have){ const f=have.contains(document.activeElement); have.remove(); if(f&&!$(id).hidden){ const r=id==='pause'?$('resume'):$('begin'); if(r)r.focus(); } } }
+}
+function ensureBuilt(){ if(!card)build(); else syncLinks(); }
 function note(t){ lastNote=t||''; if(noteEl)noteEl.textContent=lastNote; }
 function slotText(){
   const real=peekSave(G.flow?G.flow.keys.save:'bq-save-v1'), test=peekSave(G.flow?G.flow.keys.test:'bq-save-test-v1');
+  /* signed in to an account (js/slots.js): the game saves into an account save slot, not the guest save */
+  const SL=G.slots, signed=!!(SL&&SL.on&&G.account&&G.account.state==='in');
+  if(signed){
+    const a=SL.active&&SL.active(), nm=a&&a.name?esc(a.name):'';
+    if(G.testSaves||(a&&a.test)){
+      const where=a&&a.slot?'save slot '+a.slot+(nm?' ('+nm+')':'')+', marked Test':'a test slot on this device only';
+      return '<b>Test mode is on.</b> This session saves to '+where+'. Your other save slots are not touched. Reload the page to play normally again.';
+    }
+    if(a&&a.slot)return 'Using any tool here moves this session to a copy of save slot '+a.slot+(nm?' ('+nm+')':'')+' in a free slot, marked <b>Test</b>, so slot '+a.slot+' stays untouched.';
+    return 'Using any tool here plays in a save slot marked <b>Test</b>, so your other save slots stay untouched.';
+  }
   const r=real?'Your real save ('+esc(ago(real.at))+' · '+esc(real.objective||'')+')':'Your real save slot (empty)';
   if(G.testSaves)return '<b>Test mode is on.</b> This session saves to a separate test slot'+(test?' (last '+esc(ago(test.at))+')':'')+'. '+r+' is not touched. Reload the page to play normally again.';
   return 'Using any tool here switches this session to a separate <b>test save slot</b>, so '+r.charAt(0).toLowerCase()+r.slice(1)+' stays untouched.';
@@ -593,24 +632,31 @@ function render(){
   const dis=c=>c?'':' disabled';
   const testSave=peekSave(G.flow?G.flow.keys.test:'bq-save-test-v1');
   let h=`<div class="dt-top"><div><span class="eyebrow">Test tools</span><h2>God Mode</h2></div><button class="btn ghost dt-x" id="dtClose" type="button" data-act="close">Close</button></div>
-  <div class="dt-slot">${slotText()}</div>
-  <div class="dt-h">Start from</div><div class="dt-grid">`;
-  let grp='';
-  for(const s of STARTS){
-    if(s.test&&!testSave)continue;
-    if(s.group!==grp){ grp=s.group; h+=`<span class="dt-sub">${esc(grp)}</span>`; }
-    const sub=s.test?('Saved '+ago(testSave.at)+' · '+(testSave.objective||'')):s.sub;
-    h+=`<button type="button" class="dt-start${s.main?' main':''}" data-start="${s.id}"><span>${esc(s.name)}</span><small>${esc(sub)}</small></button>`;
+  <div class="dt-slot">${slotText()}</div>`;
+  if(can('start')){
+    h+=`<div class="dt-h">Start from</div><div class="dt-grid">`;
+    let grp='';
+    for(const s of STARTS){
+      if(s.test&&!testSave)continue;
+      if(s.group!==grp){ grp=s.group; h+=`<span class="dt-sub">${esc(grp)}</span>`; }
+      const sub=s.test?('Saved '+ago(testSave.at)+' · '+(testSave.objective||'')):s.sub;
+      h+=`<button type="button" class="dt-start${s.main?' main':''}" data-start="${s.id}"><span>${esc(s.name)}</span><small>${esc(sub)}</small></button>`;
+    }
+    h+=`</div>`;
   }
-  h+=`</div><div class="dt-h">Cheats</div><div class="seg">`;
-  for(const [k,l] of [['god','God mode'],['easy','Easy test · half damage'],['stamina','Infinite stamina'],['ether','Infinite ether · lamp never drains'],['fps','Show FPS']])
-    h+=`<button type="button" data-cheat="${k}" aria-pressed="${!!DT.cheats[k]}">${l}</button>`;
-  h+=`</div>`;
-  if(title)h+=`<p class="dt-note" style="color:#6c5a5f">Pick a start point; the other tools work once you’re playing (toggles carry over).</p>`;
-  h+=`<div class="dt-h">Give</div><div class="seg">`;
-  const items=(G.inv&&G.inv.ITEMS)||{};
-  for(const id in items){ const it=items[id]; h+=`<button type="button" data-give="${esc(id)}"${dis(!title)}>${id==='vial'?'+1 '+esc(it.name):'+5 '+esc(it.plural||it.name)}</button>`; }
-  h+=`<button type="button" data-act="recipes"${dis(!title&&G.alchemy)}>All recipes</button>
+  if(can('cheats')){
+    h+=`<div class="dt-h">Cheats</div><div class="seg">`;
+    for(const [k,l] of [['god','God mode'],['easy','Easy test · half damage'],['stamina','Infinite stamina'],['ether','Infinite ether · lamp never drains'],['fps','Show FPS']])
+      h+=`<button type="button" data-cheat="${k}" aria-pressed="${!!DT.cheats[k]}">${l}</button>`;
+    h+=`</div>`;
+  }
+  if(title&&can('start'))h+=`<p class="dt-note" style="color:#6c5a5f">Pick a start point; the other tools work once you’re playing (toggles carry over).</p>`;
+  else if(title)h+=`<p class="dt-note" style="color:#6c5a5f">These tools work once you’re playing.</p>`;
+  if(can('give')){
+    h+=`<div class="dt-h">Give</div><div class="seg">`;
+    const items=(G.inv&&G.inv.ITEMS)||{};
+    for(const id in items){ const it=items[id]; h+=`<button type="button" data-give="${esc(id)}"${dis(!title)}>${id==='vial'?'+1 '+esc(it.name):'+5 '+esc(it.plural||it.name)}</button>`; }
+    h+=`<button type="button" data-act="recipes"${dis(!title&&G.alchemy)}>All recipes</button>
     <button type="button" data-act="swarm"${dis(!title)}>60-moth swarm</button>
     <button type="button" data-act="jar"${dis(!title&&G.moths&&G.moths.jar&&!G.moths.jar.owned)}>Moth jar</button>
     <button type="button" data-act="heal"${dis(!title)}>Heal</button></div>
@@ -619,22 +665,32 @@ function render(){
     <button type="button" data-prog="mark"${dis(!title)}>+1 Mark</button><button type="button" data-prog="wing"${dis(!title)}>+1 Moth Wing</button>
     <button type="button" data-prog="upgrades"${dis(!title)}>All upgrades</button>
     <button type="button" data-prog="reveal" aria-pressed="${!!G.progress.reveal}"${dis(!title)}>Reveal collectibles</button></div></div>`:''}
-  <div class="dt-row"><span class="lbl">Tide <small>(${tideName()})</small></span><div class="seg">${['low','rising','high','falling'].map(k=>`<button type="button" data-tide="${k}" aria-pressed="${tideName()===k}"${dis(!title&&loop)}>${k[0].toUpperCase()+k.slice(1)}</button>`).join('')}</div></div>
-  <div class="dt-row"><span class="lbl">Time speed</span><div class="seg">${[1,4].map(n=>`<button type="button" data-speed="${n}" aria-pressed="${(G.timeScale||1)===n}">${n}×</button>`).join('')}</div></div>
+  <div class="dt-row"><span class="lbl">Tide <small>(${tideName()})</small></span><div class="seg">${['low','rising','high','falling'].map(k=>`<button type="button" data-tide="${k}" aria-pressed="${tideName()===k}"${dis(!title&&loop)}>${k[0].toUpperCase()+k.slice(1)}</button>`).join('')}</div></div>`;
+  }
+  // Time speed sits in the Give block on screen (where it always was) but belongs to Cheats: more than 1× is a cheat
+  if(can('cheats'))h+=`
+  <div class="dt-row"><span class="lbl">Time speed</span><div class="seg">${[1,4].map(n=>`<button type="button" data-speed="${n}" aria-pressed="${(G.timeScale||1)===n}">${n}×</button>`).join('')}</div></div>`;
+  if(can('give'))h+=`
   ${G.ui.setCaptionSpeed?`<div class="dt-row"><span class="lbl">Captions <small>(${G.ui.messages().length} logged)</small></span><div class="seg">${[['relaxed','Relaxed'],['standard','Standard'],['hold','Hold']].map(([k,l])=>`<button type="button" data-capspeed="${k}" aria-pressed="${G.ui.captionSpeed===k}">${l}</button>`).join('')}
-    <button type="button" data-act="capTest"${dis(!title)}>Say a burst of lines</button><button type="button" data-act="capClear">Clear message log</button></div></div>`:''}
+    <button type="button" data-act="capTest"${dis(!title)}>Say a burst of lines</button><button type="button" data-act="capClear">Clear message log</button></div></div>`:''}`;
+  if(can('map'))h+=`
   <div class="dt-h">Map</div><div class="seg">
     <button type="button" data-act="mapReveal"${dis(!title&&G.map)}>Reveal the whole map</button>
     <button type="button" data-act="mapCover"${dis(!title&&G.map)}>Cover it in cloud again</button>
-    <button type="button" data-act="mapOpen"${dis(!title&&G.map)}>Open the map</button></div>
+    <button type="button" data-act="mapOpen"${dis(!title&&G.map)}>Open the map</button></div>`;
+  if(can('teleport')){
+    h+=`
   <div class="dt-h">Teleport</div><div class="seg">`;
-  for(const s of SPOTS)h+=`<button type="button" data-tp="${s.id}"${dis(!title)}>${esc(s.name)}</button>`;
-  h+=`</div><div class="seg">`;
-  const rn={mouth:'Mouth',gallery:'Gallery',stair:'Stair',channel:'Channel',drafts:'Drafts',arena:'Arena'};
-  for(const r of CAVE_ORDER)h+=`<button type="button" data-tp="${r}"${dis(!title&&loop)}>Cave · ${rn[r]}</button>`;
-  h+=`</div><div class="dt-h">Monsters</div><div class="seg">
+    for(const s of SPOTS)h+=`<button type="button" data-tp="${s.id}"${dis(!title)}>${esc(s.name)}</button>`;
+    h+=`</div><div class="seg">`;
+    const rn={mouth:'Mouth',gallery:'Gallery',stair:'Stair',channel:'Channel',drafts:'Drafts',arena:'Arena'};
+    for(const r of CAVE_ORDER)h+=`<button type="button" data-tp="${r}"${dis(!title&&loop)}>Cave · ${rn[r]}</button>`;
+    h+=`</div>`;
+  }
+  if(can('monsters'))h+=`<div class="dt-h">Monsters</div><div class="seg">
     <button type="button" data-spawn="hollow"${dis(!title)}>Spawn hollow</button><button type="button" data-spawn="hound"${dis(!title)}>Spawn hound</button>
-    <button type="button" data-spawn="brineling"${dis(!title)}>Spawn brineling</button><button type="button" data-act="kill"${dis(!title)}>Kill nearby</button></div>
+    <button type="button" data-spawn="brineling"${dis(!title)}>Spawn brineling</button><button type="button" data-act="kill"${dis(!title)}>Kill nearby</button></div>`;
+  h+=`
   <p class="dt-note" id="dtNote" aria-live="polite"></p>`;
   const focusKey=document.activeElement&&sheet.contains(document.activeElement)?keyOf(document.activeElement):null;
   sheet.innerHTML=h; noteEl=$('dtNote'); noteEl.textContent=lastNote;
@@ -678,7 +734,7 @@ function sayBurst(){
   setTimeout(()=>say('Something stirs in the fog. (a high-priority line: it cuts in)',{priority:'high'}),2500);
 }
 function openPanel(){
-  if(!card||!card.hidden)return;
+  if(!card||!card.hidden||!active())return;
   const mode=G.state.mode;
   if(mode==='dead'||mode==='ending')return;
   opener=mode==='play'?'play':mode==='paused'?'pause':'title';
@@ -701,23 +757,73 @@ DT.spawn=spawnMonster; DT.kill=killNearby; DT.give=giveItem;
 
 /* keyboard: ` toggles; Esc closes (caught before core so it doesn't also resume/pause the game) */
 addEventListener('keydown',e=>{
-  if(e.code==='Backquote'&&!e.repeat){ e.preventDefault(); e.stopPropagation(); if(card&&!card.hidden)closePanel(); else openPanel(); return; }
+  if(e.code==='Backquote'&&!e.repeat&&active()){ e.preventDefault(); e.stopPropagation(); if(card&&!card.hidden)closePanel(); else openPanel(); return; }
   if(card&&!card.hidden&&(e.code==='Escape'||e.code==='KeyP')){ e.preventDefault(); e.stopPropagation(); closePanel(); }
 },true);
+
+/* ---------------------------------------------------------------- the account's tool groups ('roles' gate) */
+function dropCheats(){   // the cheats group was taken away: switch off what it had switched on
+  let any=false; for(const k in DT.cheats) if(DT.cheats[k]){ DT.cheats[k]=false; any=true; }
+  easyCarry=0; if(fpsEl&&!fpsEl.hidden)setFps(false); if(G.timeScale!==1){ G.timeScale=1; any=true; }
+  if(any)badge();
+}
+function revokeClose(){   // nothing left to show: close the panel, back to wherever it was opened from (paused stays paused)
+  const from=opener; closePanel(true);
+  if(G.state.mode==='paused'&&(from==='play'||from==='pause')){ const pz=$('pause'); if(pz){ if(from==='play'&&G.ui.pauseTab)G.ui.pauseTab('main'); pz.hidden=false; const r=$('resume'); if(r)r.focus(); } }
+  else if(G.state.mode==='title'){ const b=$('continue'); const t=b&&!b.hidden?b:$('begin'); if(t)t.focus(); }
+  badge();
+}
+function groupsNow(){ const A=G.account, out=new Set();
+  try{ if(A&&A.state==='in'&&typeof A.can==='function') for(const g of GROUPS) if(A.can(g))out.add(g); }catch(e){ console.error('devtools roles',e); }
+  return out; }
+function refreshRoles(){
+  if(gate!=='roles')return;
+  const next=groupsNow(), lostCheats=allowed.has('cheats')&&!next.has('cheats');
+  allowed=next;
+  if(lostCheats)dropCheats();
+  if(active())ensureBuilt(); else if(card)syncLinks();
+  if(card&&!card.hidden){ if(!active())revokeClose(); else render(); }
+}
+/* a start point chosen mid-game reloads the page (chooseStart). Run it on the new page once it's ready; with the 'roles' gate also
+   once the account has answered (G.account.ready), and only if it still has the start group: else it's dropped, not run. */
+function bootCheats(boot){
+  if(boot.cheats&&can('cheats'))Object.assign(DT.cheats,boot.cheats);
+  if(boot.timeScale&&can('cheats'))G.timeScale=boot.timeScale;
+  if(DT.cheats.fps)setFps(true);
+}
+function runBoot(boot){
+  setTimeout(()=>{ try{ runStart(boot.id); }catch(e){console.error('devtools start',e);} badge(); },30);
+}
+function dropBoot(){ if(G.state.mode==='title')G.testSaves=false; badge(); }
 
 /* ---------------------------------------------------------------- system */
 let renderT=0;
 G.system('devtools',{order:-5,modes:'always',
   init(){
-    build(); hookPlayer();
-    const boot=unstash(BOOT_KEY);
-    if(boot&&boot.id){
-      G.testSaves=true;
-      if(boot.cheats)Object.assign(DT.cheats,boot.cheats);
-      if(boot.timeScale)G.timeScale=boot.timeScale;
-      if(DT.cheats.fps)setFps(true);
-      G.on('ready',()=>setTimeout(()=>{ try{ runStart(boot.id); }catch(e){console.error('devtools start',e);} badge(); },30));
+    hookPlayer();
+    const boot=unstash(BOOT_KEY), hasBoot=!!(boot&&boot.id);
+    if(hasBoot)G.testSaves=true;   // the page before the reload chose test mode
+    if(gate==='all'){
+      build();
+      if(hasBoot){ bootCheats(boot); G.on('ready',()=>runBoot(boot)); }
+      return;
     }
+    // ROLES: decide once every module has loaded (G.account is defined by a module after this one)
+    G.on('ready',()=>{
+      const A=G.account;
+      if(!(A&&A.on)){   // no accounts running after all: the public build's old rule (?debug opens everything)
+        gate=G.debugUrl?'all':'none';
+        if(gate==='all'){ build(); if(hasBoot){ bootCheats(boot); runBoot(boot); } } else if(hasBoot)dropBoot();
+        return;
+      }
+      gate='roles';
+      for(const ev of ['account:in','account:out','account:me'])G.on(ev,refreshRoles);
+      refreshRoles();
+      if(hasBoot)Promise.resolve(A.ready).catch(()=>{}).then(()=>{
+        refreshRoles();
+        if(can('start')&&G.state.mode==='title'){ bootCheats(boot); runBoot(boot); } else dropBoot();
+      });
+    });
   },
   update(dt){
     if(DT.cheats.fps&&newFrame&&G.renderer&&G.renderer.info){ newFrame=false; const r=G.renderer.info.render; calls=r.calls; tris=r.triangles; G.renderer.info.reset(); }

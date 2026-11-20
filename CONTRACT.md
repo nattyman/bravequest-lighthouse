@@ -17,7 +17,7 @@ js/flow.js        quest beats, checkpoints, pickups, title/attract camera  (lead
 js/hud.js         HUD, menus, touch buttons  (lead)
 vendor/three      local Three.js r128 + examples/js (for dev.html only)
 ```
-Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → … → the north modules → record → badges → cloud → beta → `G.start()`.
+Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → … → the north modules → record → badges → board → account → slots → cloud → beta → `G.start()`.
 Every module is a plain script wrapped in an IIFE: `(function(){ 'use strict'; const G=window.G, THREE=G.THREE; ... })();`
 Three.js is **r128** (UMD global). No ES modules, no imports, no other libraries, no network assets. All textures are procedural (canvas) — see `G.canvasTex`.
 
@@ -103,6 +103,30 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   the cave raft, with monsters hunting you within 30 m, mid-air, and to a destination under the fog.
 - Input actions: `forward back left right jump sprint roll attack lock interact shutter potion pause advance glass fox raven` (advance = Enter or controller D-pad down: next caption; glass = hold G, or hold Y on a controller once the Remembering Glass is owned — a Y tap stays interact, sent on release; touch: the Glass button; fox = R / D-pad left / the fox touch button, raven = T / D-pad right / the raven touch button — companions.js, shown once each companion is earned). The D-pad no longer walks. `G.input.down(a)`, `G.input.pressed(a)`, `G.input.released(a)`, `G.input.move()` → {x,y,mag}, `G.input.gamepad` → `{connected,id,name,blocked,error,policy,supported,count,index,mapping,remap}` (policy false = the page's permissions policy forbids 'gamepad'; remap 'xpad'|'generic' for a pad without the standard mapping), `G.input.padState()` → the pad in use in the standard layout `{B,A}` or null, `G.input.look()` → pixel delta this frame, `G.input.wheel`, `G.input.locked`.
 - Techniques (`js/combat.js`, loaded before player.js): `G.moves.T` is the tuning table (lunge, sweep, slam, spin, plunge, dive, doubleJump, buffer, aim). `G.moves.performed(id)` names a technique on screen (toast the first time; remembered in localStorage `bq-combos`, listed in the pause menu). `G.moves.raycast(from,dir,max,{start})` → `{point,dist,hb,surface}` against floors, walls (constrainers), colliders, cave ceilings and enemy hurtboxes. `G.moves.burst(pos,{radius,color,life,lightI})` ether ring + flash. `G.moves.noDoubleJump.push(fn(pos)->bool)` forbids the double jump where it returns true. `G.player.move` → `{id, phase, doubleJumped, dived, aiming, aimK, aimPoint, cooldowns}`.
+- Keeper Accounts (js/account.js; spec ACCOUNTS.md): `G.account = {on, available, state:'off'|'checking'|'out'|'in', me, ready, can(group), fetch(path,opts),
+  open(from), close(), signOut(everywhere), refresh(), debug}`. `on` only with `BQ_CONFIG.api` + `BQ_CONFIG.accounts===true` and the page on the
+  service's site (and, under `?headless`, `window.BQ_ACCOUNTS_TEST=true` set before load); otherwise `state` is 'off', nothing shows and `ready`
+  is already resolved. `available` is `on` until the service answers `503 accounts_off` (then the Sign in button hides and
+  the board treats the player as a guest of a build without accounts). `me = {id,email,name,role,tools,hasPassword,created}`; `can(g)` is true when signed in and `me.tools` has `g`. `ready`
+  resolves (with the state) once the first `GET /v1/me` (or a `?signin=` link) has answered. `fetch` is the one way to call the service: a path
+  like `'/v1/saves/2'`, fetch options plus `auth:false` (no sync code) and `timeout` (ms, default 15 s); a plain-object `body` is sent as JSON.
+  With accounts on it adds `credentials:'include'` and `X-BQ-Client: 1`; unless signed in it adds `Authorization: Bearer <sync code>` when there
+  is one; a `401 signed_out` while signed in turns the state to 'out'. With accounts off it is a plain call with the sync code.
+- Keepers' Board (js/board.js): `G.board = {open(from), close(), push(), state, debug}`. Every call goes through `G.account.fetch`. Signed in,
+  the board belongs to the account (no sync code needed; the keeper name is the account's, re-read with `G.account.refresh()` after a change;
+  nothing is uploaded while `G.slots.active()` is a test slot; a `404 no_save` waits for `cloud:saved` / `slots:saved` / `slots:active`).
+  With accounts on, a guest with no name is offered **Sign in** (`G.account.open('boardCard')`), also on a `403 account_needed`.
+  `account:in` / `account:out` / `account:me` re-read the name and the boards. `state.signedIn / needsAccount / testSlot` for tests.
+- Typing: core.js stops game keys in every field that takes typed text (`textarea`, `input` of type text/password/email/search/tel/url/number
+  or no type, `contenteditable`); a module never needs its own guard for that.
+- `privacy.html` (repo root, static, no scripts) is copied into the release build; the account card links to it.
+- Save slots (js/slots.js, after account.js; spec ACCOUNTS.md): `G.slots = {on, list(), active() → {slot,test,name}|null, open(from), close(), use(slot),
+  newGame(), rename(slot,name), remove(slot), flush(), debug}`; events `slots:change {}`, `slots:active {slot,test}` (also on the move into a test copy; slot 0 = local test slot), `slots:uploaded {slot,test}` (after every successful upload or claim). Only while signed in: a game
+  begun signed in saves into an account slot (localStorage `bq-save-s<n>-<account id>`, uploaded with PUT /v1/saves/<n>); signed out or with
+  accounts off every hook answers null/false and saves are exactly as before. `active()` is null for a guest game; `test` is true for a test slot
+  and for the local test fallback (`slot:0`). Anything that must not run from a test save (the board, pings) checks `G.testSaves` (set for test
+  slots too) or `G.slots.active().test`. `G.flow.keys.active` is the key the game is saving to now; `G.flow.saveRecord(save)` the rank · time ·
+  completion spans for a stored save.
 - The Keeper's Record (js/record.js; spec RECORD.md): `G.record = {state, MILESTONES, BOSSES, play(), ms(id), split(id), best(id), boss(id),
   completion() → {done,total,pct,parts}, summary(), fmt(s), attempt, debug}` — play time, counters, milestone times and boss attempts, in the save
   (persist key `record`). Badges and rank (js/badges.js): `G.badges = {list() → [{id,cat,name,desc,hint,hidden,got,shown}], has(id), count(), total(),
@@ -112,6 +136,14 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   (`G.progress.welcome` = `{due(save), show(save), close(), open, enabled, allowInTests}`; setting in the pause menu, localStorage `bq-welcome`);
   never in `?debug` / headless / test-save sessions unless a test sets `allowInTests`. The title's Continue card shows rank · time played ·
   completion from the stored save (`rec` in the save, written by flow.js's snapshot).
+- Test tools (js/devtools.js): `G.devtools` = `{open, cheats, starts, start(id), teleports, openPanel(), closePanel(), toggle(k), setSpeed(n), give(id),
+  spawn(kind), kill(), setTide(k), giveSwarm(n), gate, active, groups, can(group), undercroftHooks, templeHooks}`. `gate`: `'all'` in dev builds
+  (no `BQ_CONFIG`) and in a public build opened with `?debug`; `'roles'` in a public build with accounts (`G.DEVTOOLS_ROLES`, core.js: `BQ_CONFIG.devtools===false`
+  and `BQ_CONFIG.accounts===true`, with `G.account.on`), where `?debug` and the backquote key do nothing by themselves and the panel, its links and
+  its sections follow `G.account.can(group)` for the groups `start cheats give map teleport monsters` (re-read on `account:in` / `account:out` /
+  `account:me`); `'pending'` until `ready` in such a build; `'none'` if it has no accounts module and no `?debug`. `groups` lists what is shown now.
+  In a public build with accounts, `G.devtools` exists even for players (so modules can add teleports and start hooks); check `G.devtools.active`
+  before offering anything of your own.
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
 
 ## Events (names are fixed)
@@ -153,6 +185,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `record:boss` / `record:change` / `record:newgame` | {id,win,time,hurt,draughts,tries} / {} / {run} | record |
 | `badge:earned` / `rank:up` | {id, name, restored} / {i, name} | badges |
 | `journal:tab` / `welcome:open` / `welcome:close` | {tab} / {} / {} | progression (the Journal's tabs, the welcome-back card) |
+| `account:in` / `account:out` / `account:me` | {me, fresh} / {why, id} / {me} | account (fresh: signed in on this page load, not a restored session; `why`: 'expired' (the service ended the session), 'signout', 'deleted', 'off'; `id`: the account that was signed in; `account:me`: `me` changed while signed in) |
 
 ## Module briefs (who owns what)
 **world.js** — `G.world.height/walkable/landmarks` (synchronous), terrain mesh(es) with vertex colours (cel-shaded), sea (animated), sky dome (dusk gradient + moon + stars faint), fog, sea stacks, forest (instanced trunks/canopies; colliders for trunks), moor heath + wildflowers, local grass that follows `G.focus` for density, rocks, ruined hamlet, standing stones, stone walls, keeper's cottage + shed with warm windows, the cliff-path ramp, the Resisting Tree, path rendering, mushrooms visuals, atmosphere application (reads `G.atmo`), hemi/sun colours. Registers colliders for trees, rocks, buildings.

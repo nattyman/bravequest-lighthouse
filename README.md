@@ -3,7 +3,7 @@
 A 3D adventure in the browser, built with Three.js (r128) and the Web Audio API. A gentle Gothic fairytale: you
 wake at the foot of a dead lighthouse on a sea cliff, the great lamp is dark and the fog is rolling in.
 
-Play the public beta at https://nattyman.github.io/bravequest-lighthouse/ (rebuilt from `main` on every push).
+Play the public beta at https://bravequest.numinexstudio.com/ (rebuilt from `main` on every push).
 
 All rights reserved (see `LICENSE`). The code is public so the checks run in the open; it is not open source.
 

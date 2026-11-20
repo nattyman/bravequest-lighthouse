@@ -1,7 +1,11 @@
-# Publishes the public beta to GitHub Pages: https://nattyman.github.io/bravequest-lighthouse/
+# Publishes the public beta to GitHub Pages, served at https://bravequest.numinexstudio.com/
+# (the old https://nattyman.github.io/bravequest-lighthouse/ address redirects there).
 # Builds dist/ with test/build_release.py (Three.js and fonts bundled, Test tools off, pointed at the save
 # service) and deploys only that folder, so the design docs and tests are not on the site.
 # Runs on every push to main, after the change has been through a pull request and its checks.
+# Three optional repository variables (Settings > Secrets and variables > Actions > Variables) change the build
+# without a code change: BQ_API (the save service's address), BQ_DIRECT (the game's own address) and
+# BQ_ACCOUNTS (set to "on" to build with accounts: sign-in, save slots). Unset, the build is the guest-only beta.
 name: pages
 on:
   push:
@@ -21,13 +25,20 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      BQ_API: ${{ vars.BQ_API || 'https://bravequest-api.numinexstudio.com' }}
     steps:
       - uses: actions/checkout@v4
+      # If the save service does not answer at the address the game is about to be built for, stop here:
+      # the site that is already published stays up, instead of a new one whose cloud saves cannot connect.
+      - name: Check the save service answers
+        run: curl -fsS --retry 3 --retry-delay 5 --max-time 20 "$BQ_API/health"
       - name: Build the beta
         run: >-
           python3 test/build_release.py
-          --api https://bravequest-api.saturnsites.com
-          --direct https://nattyman.github.io/bravequest-lighthouse/
+          --api "$BQ_API"
+          --direct ${{ vars.BQ_DIRECT || 'https://bravequest.numinexstudio.com/' }}
+          ${{ vars.BQ_ACCOUNTS == 'on' && '--accounts' || '' }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

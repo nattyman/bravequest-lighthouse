@@ -13,6 +13,9 @@ G.PI=PI; G.TAU=TAU;
 /* DEVTOOLS: the one switch for the "Test tools" panel (js/devtools.js). false hides it, unless the URL has ?debug.
    While it's on, the test helpers other modules expose under G.debug (G.debugStartLoop, G.debugEnterCave, …) exist too. */
 G.DEVTOOLS=!(window.BQ_CONFIG&&window.BQ_CONFIG.devtools===false); // the public beta build turns it off (test/build_release.py)
+/* DEVTOOLS_ROLES: a public build with accounts (BQ_CONFIG.accounts===true): there ?debug no longer opens the panel; the signed-in
+   account's tool groups do (devtools.js, G.account.can). Spec: ACCOUNTS.md */
+G.DEVTOOLS_ROLES=!!(window.BQ_CONFIG&&window.BQ_CONFIG.devtools===false&&window.BQ_CONFIG.accounts===true);
 G.debugUrl=/[?&]debug/.test(location.search);
 G.debug=G.debugUrl||G.DEVTOOLS;
 G.timeScale=1; // devtools time speed: whole-number substeps per frame while playing
@@ -238,9 +241,11 @@ const joy={on:false,id:null,ox:0,oy:0,x:0,y:0}, look={id:null,x:0,y:0};
 const actionsOf=code=>Object.keys(BIND).filter(a=>BIND[a].includes(code));
 function press(code){ if(!held.has(code)){held.add(code);actionsOf(code).forEach(a=>pressed.add(a));} }
 function release(code){ if(held.has(code)){held.delete(code);actionsOf(code).forEach(a=>released.add(a));} }
-/* typing in a text field (the beta's feedback box, a sync code) is never game input. core.js loads first, so these
-   capture listeners run before every other module's key handler and stop the key there; the browser still types it. */
-const typing=e=>{ const t=e.target; return !!(t&&t.matches&&t.matches('textarea,input[type=text],input:not([type])')); };
+/* typing in a text field (the beta's feedback box, a sync code, an email address or password) is never game input. core.js
+   loads first, so these capture listeners run before every other module's key handler and stop the key there; the browser
+   still types it. Every input type that takes typed text counts (checkboxes, ranges and buttons don't). */
+const TYPING='textarea,input:not([type]),input[type=text],input[type=password],input[type=email],input[type=search],input[type=tel],input[type=url],input[type=number],[contenteditable]:not([contenteditable=false])';
+const typing=e=>{ const t=e.target; return !!(t&&t.matches&&t.matches(TYPING)); };
 addEventListener('keydown',e=>{ if(typing(e))e.stopImmediatePropagation(); },true);
 addEventListener('keyup',e=>{ if(typing(e))e.stopImmediatePropagation(); },true);
 addEventListener('keydown',e=>{ if(e.repeat)return;

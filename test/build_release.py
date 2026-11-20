@@ -1,13 +1,14 @@
 # Builds the public beta: a self-contained dist/ folder (and a zip of it for itch.io) that makes no request to
 # any CDN. Everything the page loads is in the folder: the game modules, Three.js from vendor/, the fonts from
-# vendor/fonts/, the music, the sound effects and the icons (icons/, manifest.webmanifest).
+# vendor/fonts/, the music, the sound effects, the icons (icons/, manifest.webmanifest) and the privacy page (privacy.html).
 #
-#   python3 test/build_release.py --api https://bravequest-api.saturnsites.com
-#   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://nattyman.github.io/bravequest-lighthouse-3d/
+#   python3 test/build_release.py --api https://bravequest-api.numinexstudio.com
+#   python3 test/build_release.py --api ... --version 0.9.0-beta.2 --direct https://bravequest.numinexstudio.com/
 #
 # --api      the Lighthouse save service (server/). Turns on Sync devices, Send feedback and the progress pings
 #            (js/cloud.js, js/beta.js). Leave it out for a build with none of those.
 # --version  shown small on the title and pause cards, and sent with feedback. The short git commit is appended.
+# --accounts turns on Keeper Accounts (sign in, the account card; js/account.js): BQ_CONFIG.accounts=true. Needs --api.
 # --direct   the game's own address (not the itch.io page), for link previews.
 # --out      output folder (default dist). The zip is written next to it.
 #
@@ -19,6 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--api', default='')
 ap.add_argument('--version', default='0.9.0-beta.1')
 ap.add_argument('--direct', default='')
+ap.add_argument('--accounts', action='store_true')
 ap.add_argument('--out', default=os.path.join(root, 'dist'))
 a = ap.parse_args()
 
@@ -52,6 +54,9 @@ if unlisted: fail('modules on disk that index.html does not load: ' + ', '.join(
 cfg = {'version': version, 'devtools': False}
 if a.api: cfg['api'] = a.api.rstrip('/')
 if a.direct: cfg['direct'] = a.direct
+if a.accounts:
+    if not a.api: fail('--accounts needs --api')
+    cfg['accounts'] = True
 first = '<script src="vendor/three/three.min.js"></script>'
 if first not in s: fail('could not find the Three.js script tag')
 s = s.replace(first, '<script>window.BQ_CONFIG=' + json.dumps(cfg) + ';</script>\n' + first, 1)
@@ -96,11 +101,16 @@ for d in ('audio', 'sfx', 'icons', os.path.join('vendor', 'fonts')):
     for dp, _, fs in os.walk(os.path.join(root, d)):
         files += [os.path.relpath(os.path.join(dp, f), root) for f in fs if not f.startswith('.')]
 files.append('manifest.webmanifest')
+files.append('privacy.html')   # the privacy page the account card links to (static: no scripts, nothing from other sites)
 files.append(os.path.join('vendor', 'three', 'LICENSE'))   # Three.js is MIT: its licence text travels with it
 for f in files:
     src = os.path.join(root, f)
     if not os.path.exists(src): fail('missing file: ' + f)
     dst = os.path.join(out, f); os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.copy2(src, dst)
+
+# 6b. the privacy page must stay self-contained, like the game
+pv = open(os.path.join(root, 'privacy.html'), encoding='utf-8').read()
+if re.search(r'<script|(?:src|href)="(?:https?:)?//', pv, re.I): fail('privacy.html must have no scripts and load nothing from other sites')
 
 # 7. the zip for itch.io (index.html at the top level)
 zname = os.path.join(os.path.dirname(out), 'bravequest-lighthouse-' + re.sub(r'[^A-Za-z0-9._-]', '-', a.version) + '.zip')
