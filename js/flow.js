@@ -125,6 +125,7 @@ function halPos(){ const h=G.creatures&&G.creatures.halloran; return h&&h.pos?h.
 /* the Stag's clearing: rise point at its east edge (outside the arena, outside the 30 m trigger) */
 function stagEdge(){ const t=LM().resistingTree||{x:-165,z:5}, x=t.x+39, z=t.z+2; return V(x,G.world.height(x,z),z); }
 function begin(fromSave){
+  if(G.slots&&G.slots.beginning)G.slots.beginning(fromSave);   // signed in: which save slot this game uses (slots.js)
   $('title').hidden=true; $('hud').hidden=false; $('pauseBtn').hidden=false;
   const save=fromSave===true?readSave():(fromSave&&typeof fromSave==='object'?fromSave:null); // devtools.js passes a built save object
   if(save){
@@ -294,7 +295,8 @@ function updateBeats(dt){
    Auto-saves at milestones and every 45 s of calm play; manual save in the pause menu.
    Stored per browser (localStorage). Killed monsters and freed negatives reset on load. */
 const SAVE_KEY='bq-save-v1', TEST_KEY='bq-save-test-v1'; // devtools.js sets G.testSaves: this session then saves to the test slot only
-const saveKey=()=>G.testSaves?TEST_KEY:SAVE_KEY;
+const slotKey=k=>G.slots&&G.slots[k]?G.slots[k]():null;   // signed in: the save slot's key (slots.js); else null
+const saveKey=()=>slotKey('saveKey')||(G.testSaves?TEST_KEY:SAVE_KEY);
 const safePos=new THREE.Vector3(); let safeYaw=0, safeT=0, autoT=0, savedEl=null;
 const arr=v=>v?[+v.x.toFixed(2),+v.y.toFixed(2),+v.z.toFixed(2)]:null;
 function threatened(){ const P=G.player; if(!G.monsters||!G.monsters.list)return false;
@@ -329,7 +331,7 @@ function writeSave(){
   return true;
 }
 function autosave(){ setTimeout(writeSave,400); }
-function readSave(key){ try{ const d=JSON.parse(localStorage.getItem(key||SAVE_KEY)||'null'); return d&&d.v===1?d:null; }catch(_){ return null; } }
+function readSave(key){ try{ const d=JSON.parse(localStorage.getItem(key||slotKey('readKey')||SAVE_KEY)||'null'); return d&&d.v===1?d:null; }catch(_){ return null; } }
 function applySave(d){
   const L=G.items.lantern, P=G.player, v3=a=>a?V(a[0],a[1],a[2]):null;
   Object.assign(G.state.flags,d.flags||{});
@@ -404,6 +406,7 @@ document.addEventListener('pointerlockchange',()=>{
 if(G.debug)G.debugStartLoop=()=>{ if(G.lighthouse&&G.lighthouse.restoreCured&&!G.lighthouse.cured){G.lighthouse.restoreCured();G.emit('lamp:cured',{restored:true});} G.items.staff.owned=true; if(G.lighthouse&&G.lighthouse.restoreStaff)G.lighthouse.restoreStaff(); G.emit('staff:pickup',{restored:true}); if(G.items.cloak){G.items.cloak.owned=true; G.player.setCloak&&G.player.setCloak(true);} const T=storm(); if(T.pos&&!T.spent){T.found=T.failed=T.spent=true;T.carried=false;} stagDead=true; bossDead=true; finaleArmed=false; startLoop(false); };
 /* the title's Continue button and save line, from whatever save is in this browser (cloud.js calls it again after pulling a newer save) */
 function refreshTitle(){
+  if(G.slots&&G.slots.title&&G.slots.title())return;   // signed in: the account's save slots (slots.js)
   const sv=readSave(), c=$('continue'), b=$('begin'), info=$('saveInfo'); if(!c||!b||!info)return;
   c.hidden=!sv; b.textContent=sv?'New game':'Begin'; b.classList.toggle('ghost',!!sv);
   info.hidden=!sv; info.textContent=sv?'Saved '+ago(sv.at)+' · '+(sv.objective||'')+'. Starting a new game replaces this save once it auto-saves.':'';
@@ -420,15 +423,16 @@ function saveRecord(sv){
   return out;
 }
 /* hooks for devtools.js (test start points build a save object and play it through applySave, the same path as Continue) */
-G.flow={begin, refreshTitle, applySave, snapshot, writeSave, readSave, startLoop, keys:{save:SAVE_KEY,test:TEST_KEY}, get bossDead(){return bossDead;}, get stagDead(){return stagDead;},
+G.flow={begin, refreshTitle, applySave, snapshot, writeSave, readSave, saveRecord, startLoop, keys:{save:SAVE_KEY,test:TEST_KEY,get active(){ return saveKey(); }}, get bossDead(){return bossDead;}, get stagDead(){return stagDead;},
   stagEdge, halTowerSpot};
 G.system('flow',{order:60,modes:'always',
   init(){
     initShrooms();
     savedEl=$('saved');
     refreshTitle();
-    $('continue').addEventListener('click',()=>begin(true));
-    $('begin').addEventListener('click',()=>begin(false));
+    const slots=k=>!!(G.slots&&G.slots.intercept&&G.slots.intercept(k));   // signed in: the slot list / the first empty slot
+    $('continue').addEventListener('click',()=>{ if(!slots('continue'))begin(true); });
+    $('begin').addEventListener('click',()=>{ if(!slots('new'))begin(false); });
     // title sub-screens: Controls and Credits (B / Esc / Back return to the card that opened them: the title, or the ending)
     const sub=(id,backId,openers)=>{ const card=$(id), back=$(backId); if(!card||!back)return;
       const close=()=>{ const from=card.dataset.from||'title'; card.hidden=true; if($(from))$(from).hidden=false; const b=$(card.dataset.opener||''); if(b)try{b.focus();}catch(_){} };
@@ -438,8 +442,9 @@ G.system('flow',{order:60,modes:'always',
       document.addEventListener('keydown',e=>{ if(!card.hidden&&(e.key==='Escape'||e.key==='Backspace')){ e.preventDefault(); close(); } }); };
     sub('controlsCard','controlsBack',[['controlsBtn','title']]); sub('credits','creditsBack',[['creditsBtn','title'],['endCredits','ending']]);
     $('pauseBtn').addEventListener('click',e=>{ e.preventDefault(); if(G.state.mode==='play')pause(); else if(G.state.mode==='paused')resume(); });
-    $('saveBtn').addEventListener('click',()=>{ $('saveNote').textContent=writeSave()?(G.cloud&&G.cloud.state==='on'&&!G.testSaves?'Saved, and it will follow you to your other devices.':'Saved. You can close the game and pick up here later.'):'Couldn’t save: this browser is blocking storage.'; if(G.cloud&&G.cloud.flush)G.cloud.flush(); });
-    $('quitBtn').addEventListener('click',()=>{ writeSave(); const done=()=>location.reload(); const f=G.cloud&&G.cloud.flush?G.cloud.flush():null; if(f&&f.then){ Promise.race([f,new Promise(r=>setTimeout(r,3000))]).then(done,done); } else done(); });
+    $('saveBtn').addEventListener('click',()=>{ const acc=G.slots&&G.slots.uploading;
+      $('saveNote').textContent=writeSave()?(acc?'Saved, and it goes to your account, so it follows you to any device you sign in on.':G.cloud&&G.cloud.state==='on'&&!G.testSaves?'Saved, and it will follow you to your other devices.':'Saved. You can close the game and pick up here later.'):'Couldn’t save: this browser is blocking storage.'; if(G.cloud&&G.cloud.flush)G.cloud.flush(); if(acc)G.slots.flush(); });
+    $('quitBtn').addEventListener('click',()=>{ writeSave(); const done=()=>location.reload(); const f=G.slots&&G.slots.uploading?G.slots.flush():G.cloud&&G.cloud.flush?G.cloud.flush():null; if(f&&f.then){ Promise.race([f,new Promise(r=>setTimeout(r,3000))]).then(done,done); } else done(); });
     document.querySelectorAll('#qualitySeg button').forEach(b=>b.addEventListener('click',()=>{ G.setQuality(b.dataset.q); syncQuality(); }));
     document.querySelectorAll('#invertSeg button').forEach(b=>b.addEventListener('click',()=>{ G.setInvertY(b.dataset.invert==='1'); syncQuality(); }));
     G.on('mode',e=>{ $('pauseBtn').hidden=!(e.mode==='play'||e.mode==='paused'); });
