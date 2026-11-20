@@ -283,7 +283,10 @@ let camSwing=0;   // radians the cave has swung the camera boom round its target
 G.cameraConstrainers.push((cam,target)=>{
   if(!S.inside)return;
   const tx=target.x-O.x, ty=target.y-O.y, tz=target.z-O.z, cx=cam.x-O.x, cy=cam.y-O.y, cz=cam.z-O.z;
-  const bad=(x,y,z)=>Sat(x,z)>-.24||y>Cat(x,z)-.34||y<Fat(x,z)+.4||(y<water()+.18&&Fat(x,z)<water()); // margins leave room for camera shake
+  // margins leave room for camera shake. The floor's is horizontal too: a hurt shakes the camera up to ~.25 m every way after it is
+  // placed, and against a steep bank (the Undertow's pool, ~2 m of drop per metre) that sideways jitter alone put it inside the rock
+  const Fs=(x,z)=>Math.max(Fat(x,z),Fat(x+.3,z),Fat(x-.3,z),Fat(x,z+.3),Fat(x,z-.3));
+  const bad=(x,y,z)=>Sat(x,z)>-.24||y>Cat(x,z)-.34||y<Fs(x,z)+.4||(y<water()+.18&&Fat(x,z)<water());
   const L=Math.hypot(cx-tx,cy-ty,cz-tz), n=Math.max(1,Math.ceil(L/.12));
   let gx=tx,gy=ty,gz=tz;
   if(bad(tx,ty,tz)){ // target itself is tight: just keep the camera under the ceiling
@@ -292,7 +295,7 @@ G.cameraConstrainers.push((cam,target)=>{
     let bx=tx, bz=tz; const P=G.player&&G.player.pos;
     if(P&&Sat(tx,tz)>-.3){ const px=P.x-O.x, pz=P.z-O.z; bx=px; bz=pz; const m=Math.max(1,Math.ceil(Math.hypot(tx-px,tz-pz)/.08));
       for(let i=1;i<=m;i++){ const x=px+(tx-px)*i/m, z=pz+(tz-pz)*i/m; if(Sat(x,z)>-.3)break; bx=x; bz=z; } }
-    cam.set(bx+O.x,O.y+Math.min(Math.max(ty,Fat(bx,bz)+.45),Cat(bx,bz)-.2),bz+O.z); return; }
+    cam.set(bx+O.x,O.y+Math.min(Math.max(ty,Fs(bx,bz)+.45),Cat(bx,bz)-.2),bz+O.z); return; }
   // how far the boom gets out from the target, swung by `rot` about it (y unchanged)
   const reach=rot=>{ const c=Math.cos(rot), sn=Math.sin(rot), dx=(cx-tx)*c+(cz-tz)*sn, dz=-(cx-tx)*sn+(cz-tz)*c; let x0=tx,y0=ty,z0=tz,k=0;
     for(let i=1;i<=n;i++){ const t=i/n, x=tx+dx*t, y=ty+(cy-ty)*t, z=tz+dz*t; if(bad(x,y,z))break; x0=x;y0=y;z0=z;k=t; } return {x:x0,y:y0,z:z0,k}; };

@@ -141,7 +141,7 @@ window.NAN=window.NAN||[]; if(!console._nanHook){ const ce=console.error; consol
 window.CAM={n:0,bad:[]}; G.system('camCheck',{order:99,modes:['play'],update(){ if(!G.cave.inside)return; const D=G.cave._debug, O=G.cave.origin, c=G.camera.position, x=c.x-O.x, y=c.y-O.y, z=c.z-O.z;
   CAM.n++; const s=D.Sat(x,z), f=D.Fat(x,z), cc=D.Cat(x,z); const b=s>.02?'rock':y>cc+.02?'ceil':y<f-.12?'floor':''; /* .1: hurt / landing shake jitters the camera after it is placed */ if(b&&CAM.bad.length<50)CAM.bad.push([b,G.cave.room(G.player.pos),+x.toFixed(1),+y.toFixed(1),+z.toFixed(1)]);
   if(b&&CAM.diag.length<12){ const P=G.player, pl=G.cave.toLocal(P.pos), q=CAM.last||{}; CAM.diag.push({cam:[+x.toFixed(2),+y.toFixed(2),+z.toFixed(2)],F:+f.toFixed(2),C:+cc.toFixed(2),S:+s.toFixed(2),pl:[+pl.x.toFixed(2),+pl.y.toFixed(2),+pl.z.toFixed(2)],plF:+D.Fat(pl.x,pl.z).toFixed(2),
-    p:q.p,t:q.t,tF:q.tF,tBad:q.tBad,w:+G.cave.water().toFixed(2),lock:!!P.lockTarget,gr:P.grounded,mode:G.state.mode,boss:G.caveBoss&&G.caveBoss.state}); } }});
+    p:q.p,c85:window.C85,t:q.t,tF:q.tF,tBad:q.tBad,w:+G.cave.water().toFixed(2),lock:!!P.lockTarget,gr:P.grounded,mode:G.state.mode,boss:G.caveBoss&&G.caveBoss.state}); } }});
 CAM.diag=[]; G.cameraConstrainers.push((cam,t)=>{ if(!G.cave.inside)return; const O=G.cave.origin, D=G.cave._debug, tx=t.x-O.x, ty=t.y-O.y, tz=t.z-O.z;
   CAM.last={p:[+(cam.x-O.x).toFixed(2),+(cam.y-O.y).toFixed(2),+(cam.z-O.z).toFixed(2)],t:[+tx.toFixed(2),+ty.toFixed(2),+tz.toFixed(2)],tF:+D.Fat(tx,tz).toFixed(2),tBad:D.Sat(tx,tz)>-.24||ty>D.Cat(tx,tz)-.34||ty<D.Fat(tx,tz)+.4||(ty<G.cave.water()+.18&&D.Fat(tx,tz)<G.cave.water())}; }); 'cam'
 """
