@@ -161,7 +161,11 @@ async def main():
             return pg
         async def signin(ctx, pg, email):
             await ctx.add_cookies([fake.cookie(email)])
-            await pg.evaluate("G.account.refresh()"); await pg.wait_for_timeout(700)
+            await pg.evaluate("G.account.refresh()")
+            await pg.wait_for_function("e => G.account.me&&G.account.me.email===e", arg=email, timeout=60000, polling=100)
+            try: await pg.wait_for_function("!G.slots.debug.log.length||G.slots.debug.log.slice(-1)[0].p!=='/v1/saves'||true", timeout=5000)
+            except Exception: pass
+            await pg.wait_for_timeout(1200)
         async def st(pg): return await pg.evaluate(ST)
         async def click(pg, sel):
             await pg.evaluate("s => { const b=document.querySelector(s); if(!b||b.hidden||!b.getClientRects().length)throw new Error('not shown '+s); b.click(); }", sel)
@@ -253,7 +257,9 @@ async def main():
             check('offlineUnsent', v['unsent'] and fake.slots[aid][1]['at'] < v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at']})
             fake.down = False
             await pg.evaluate("window.dispatchEvent(new Event('online'))")
-            await until(lambda: fake.slots[aid][1]['at'] == v['la']); await pg.wait_for_timeout(800)
+            await until(lambda: fake.slots[aid][1]['at'] == v['la'])
+            try: await pg.wait_for_function("!G.slots.debug.view(1).unsent", timeout=30000, polling=200)
+            except Exception: pass
             v = await pg.evaluate("G.slots.debug.view(1)")
             dbg = await pg.evaluate("JSON.stringify({m:G.slots.debug.meta().s[1],log:G.slots.debug.log.slice(-8)})")
             check('uploadOnReconnect', not v['unsent'] and fake.slots[aid][1]['at'] == v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at'], 'v': {k: v[k] for k in ('unsent', 'sa', 'conflict')}, 'dbg': dbg})
@@ -363,7 +369,7 @@ async def main():
             check('otherAccountEmpty', s['acc'] == 'in' and all(not x['used'] for x in s['list']) and not s['tcont'] and s['tbegin'] == 'Begin', [x['used'] for x in s['list']])
             await pg.evaluate("G.account.signOut()"); await pg.wait_for_timeout(500)
             await signin(ctx, pg, A); s = await st(pg)
-            check('ownSlotsBack', s['acc'] == 'in' and [x['slot'] for x in s['list'] if x['used']][:2] == [1, 2] and s['tcont'], [x['used'] for x in s['list']])
+            check('ownSlotsBack', s['acc'] == 'in' and [x['slot'] for x in s['list'] if x['used']][:2] == [1, 2] and s['tcont'], dict(acc=s['acc'], tcont=s['tcont'], info=s['info'], used=[x['used'] for x in s['list']]))
             await ctx.close()
         await step('twoAccounts', twoAccounts, ('keepAccount',))
 
