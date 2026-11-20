@@ -31,7 +31,9 @@
    game saves to the browser exactly as before.
    API: G.cloud = { state: 'off'|'checking'|'on'|'local-only', mode: ''|'claude'|'sync', flush(),
                     sync: { available, code(), off, enable(), join(code), disable(),
-                            auto: { after, played, trying } (read-only, for the Sync card and tests) } }   (sync UI: beta.js)
+                            forget(), auto: { after, played, trying } (read-only, for the Sync card and tests) } }   (sync UI: beta.js)
+   Signed in on a save slot (slots.js, G.slots.active()), none of this runs for that game: the slot uploads itself.
+   forget(): drops the code without remembering "off" (slots.js, after the code's save was claimed into an account).
    ========================================================================= */
 (function(){
 'use strict';
@@ -49,6 +51,7 @@ function note(t){ const el=$('cloudNote'); if(!el)return; el.hidden=!t; el.textC
 const wait=(p,ms)=>new Promise((res,rej)=>{ let done=false; p.then(v=>{ done=true; res(v); },e=>{ done=true; rej(e); });
   const late=n=>{ if(done)return; if(n<=0)rej({code:'timeout'}); else setTimeout(()=>late(n-1),250); };
   setTimeout(()=>late(2),ms); });
+const slotted=()=>!!(G.slots&&G.slots.active&&G.slots.active());   // a signed-in game saves into an account slot (slots.js): no guest sync for it
 function key(){ return G.flow&&G.flow.keys?G.flow.keys.save:'bq-save-v1'; }
 function localRaw(){ try{ return localStorage.getItem(key()); }catch(_){ return null; } }
 function parse(s){ try{ const d=JSON.parse(s); return d&&d.v===1?d:null; }catch(_){ return null; } }
@@ -132,13 +135,15 @@ const sync={
   disable(){ try{ localStorage.removeItem(KEY_NAME); localStorage.setItem(OFF_NAME,'1'); }catch(_){}   // remembered: automatic backup stays off here
     if(S.autoBusy)S.autoCancel=true; S.tell=false;
     clearTimeout(S.timer); S.timer=0; S.ref=null; S.state='off'; note(''); },
+  forget(){ try{ localStorage.removeItem(KEY_NAME); }catch(_){}           // the code was retired (its save moved into an account): drop it, no "off" flag
+    if(S.autoBusy)S.autoCancel=true; S.tell=false; clearTimeout(S.timer); S.timer=0; S.ref=null; S.state='off'; S.mode=API?'sync':S.mode; note(''); },
   auto:{ get after(){ return AUTO_AFTER; }, get played(){ return S.played; }, get trying(){ return S.autoBusy; } }
 };
 function clearOff(){ try{ localStorage.removeItem(OFF_NAME); }catch(_){} }
 
 /* ---- automatic backup: a device with no code starts on its own after AUTO_AFTER s of play (see the header) ---- */
 function autoOK(){
-  if(!sync.available||S.mode==='claude'||G.testSaves||G.debug)return false;
+  if(!sync.available||S.mode==='claude'||G.testSaves||G.debug||slotted())return false;
   if(S.ref||S.autoBusy||S.state==='checking'||storedKey())return false;
   try{ if(localStorage.getItem(OFF_NAME))return false;                       // the player turned it off on this device
     localStorage.setItem(AUTO_NAME+'-probe','1'); localStorage.removeItem(AUTO_NAME+'-probe'); }
@@ -183,7 +188,7 @@ if(API)G.on('save:written',()=>{ if(S.reached)autoStart(); });
 
 /* one upload at a time; anything saved while one is in flight goes up next */
 async function put(){
-  if(S.state!=='on'||G.testSaves)return;
+  if(S.state!=='on'||G.testSaves||slotted())return;
   if(S.busy){ S.dirty=true; return; }
   const raw=localRaw(), d=parse(raw); if(!d||d.at<=S.remoteAt)return;
   if(raw.length>DOC_LIMIT){ return; }                      // too big for one document: stay local
@@ -202,14 +207,14 @@ async function put(){
   if(S.dirty)schedule();
 }
 function schedule(){
-  if(S.state!=='on'||G.testSaves||S.timer)return;
+  if(S.state!=='on'||G.testSaves||S.timer||slotted())return;
   if(S.busy){ S.dirty=true; return; }                      // the upload in flight schedules the next one when it lands
   const ms=Math.max(0,GAP-(Date.now()-S.lastPut));
   S.timer=setTimeout(()=>{ S.timer=0; put(); },ms);
 }
 /* waits for an upload already in flight, then sends whatever is newer than it */
 async function flush(){
-  if(S.state!=='on')return; clearTimeout(S.timer); S.timer=0;
+  if(S.state!=='on'||slotted())return; clearTimeout(S.timer); S.timer=0;
   if(S.busy&&S.inflight){ try{ await S.inflight; }catch(_){} clearTimeout(S.timer); S.timer=0; }
   return put();
 }

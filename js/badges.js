@@ -87,13 +87,13 @@ function merge(d){
 }
 
 /* ---------------------------------------------------------------- the copy kept in this browser */
-const localKey=()=>G.testSaves?'bq-badges-test':'bq-badges';
+const localKey=()=>{ const a=G.slots&&G.slots.owner&&G.slots.owner(); return G.testSaves?'bq-badges-test':a?'bq-badges-'+a:'bq-badges'; };   // signed in: per account (slots.js)
 function readLocal(){ try{ return JSON.parse(localStorage.getItem(localKey())||'null'); }catch(_){ return null; } }
 function writeLocal(){ try{ localStorage.setItem(localKey(),JSON.stringify(S)); }catch(_){} }
 function storedSave(){
   try{
     const F=G.flow; if(!F||!F.readSave)return null;
-    const key=G.testSaves&&F.keys?F.keys.test:(F.keys&&F.keys.save);
+    const key=(G.slots&&G.slots.saveKey&&G.slots.saveKey())||(G.testSaves&&F.keys?F.keys.test:(F.keys&&F.keys.save));
     const d=F.readSave(key); return d&&d.mods&&d.mods.badges||null;
   }catch(_){ return null; }
 }

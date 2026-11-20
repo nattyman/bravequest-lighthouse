@@ -173,7 +173,8 @@ function storedRecord(){
 }
 function newRun(){
   const touched=loadedHere||S.play>0||Object.keys(S.ms).length>0||S.runs.length>0;
-  const prev=touched?S:storedRecord();
+  // signed in, a new game goes into an empty save slot (slots.js): nothing is replaced, so no run is finished — the slot starts its own record
+  const prev=G.slots&&G.slots.active&&G.slots.active()?null:touched?S:storedRecord();
   const s=defaults();
   if(prev){
     s.runs=prev.runs.slice();

@@ -17,7 +17,7 @@ js/flow.js        quest beats, checkpoints, pickups, title/attract camera  (lead
 js/hud.js         HUD, menus, touch buttons  (lead)
 vendor/three      local Three.js r128 + examples/js (for dev.html only)
 ```
-Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → … → the north modules → record → badges → board → account → cloud → beta → `G.start()`.
+Load order: three → postprocessing → core → world → lighthouse → combat → player → creatures → monsters → flow → hud → … → undercroft_boss → companions → … → the north modules → record → badges → board → account → slots → cloud → beta → `G.start()`.
 Every module is a plain script wrapped in an IIFE: `(function(){ 'use strict'; const G=window.G, THREE=G.THREE; ... })();`
 Three.js is **r128** (UMD global). No ES modules, no imports, no other libraries, no network assets. All textures are procedural (canvas) — see `G.canvasTex`.
 
@@ -119,6 +119,13 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 - Typing: core.js stops game keys in every field that takes typed text (`textarea`, `input` of type text/password/email/search/tel/url/number
   or no type, `contenteditable`); a module never needs its own guard for that.
 - `privacy.html` (repo root, static, no scripts) is copied into the release build; the account card links to it.
+- Save slots (js/slots.js, after account.js; spec ACCOUNTS.md): `G.slots = {on, list(), active() → {slot,test,name}|null, open(from), close(), use(slot),
+  newGame(), rename(slot,name), remove(slot), flush(), debug}`; events `slots:change {}`, `slots:active {slot,test}` (also on the move into a test copy; slot 0 = local test slot), `slots:uploaded {slot,test}` (after every successful upload or claim). Only while signed in: a game
+  begun signed in saves into an account slot (localStorage `bq-save-s<n>-<account id>`, uploaded with PUT /v1/saves/<n>); signed out or with
+  accounts off every hook answers null/false and saves are exactly as before. `active()` is null for a guest game; `test` is true for a test slot
+  and for the local test fallback (`slot:0`). Anything that must not run from a test save (the board, pings) checks `G.testSaves` (set for test
+  slots too) or `G.slots.active().test`. `G.flow.keys.active` is the key the game is saving to now; `G.flow.saveRecord(save)` the rank · time ·
+  completion spans for a stored save.
 - The Keeper's Record (js/record.js; spec RECORD.md): `G.record = {state, MILESTONES, BOSSES, play(), ms(id), split(id), best(id), boss(id),
   completion() → {done,total,pct,parts}, summary(), fmt(s), attempt, debug}` — play time, counters, milestone times and boss attempts, in the save
   (persist key `record`). Badges and rank (js/badges.js): `G.badges = {list() → [{id,cat,name,desc,hint,hidden,got,shown}], has(id), count(), total(),
