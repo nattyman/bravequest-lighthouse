@@ -310,6 +310,8 @@ async def main():
             ck = await ctx.cookies(API)
             check('codeSignIn', c['state'] == 'in' and c['view'] == 'account' and c['me']['email'] == EMAIL and 'signed in' in c['note'] and c['ev'][-1] == {'n': 'account:in', 'fresh': True, 'name': '', 'email': EMAIL}
                   and any(k['name'] == 'bq_s' and k['httpOnly'] for k in ck) and c['links'] == ['Account', 'Account'] and await pg.evaluate("G.account.debug.last") == 'link', dict(c, cookies=len(ck)))
+            sy = await pg.evaluate("[...document.querySelectorAll('[data-sync-link]')].map(b=>b.hidden?'hidden':'shown')")   # signed in, saves follow the account: Sync devices (the guest save's) is hidden
+            check('syncHiddenSignedIn', sy == ['hidden', 'hidden'], sy)
         await step('linkFlow', linkFlow, ('signInCard',))
 
         async def fetchIn():
@@ -366,6 +368,8 @@ async def main():
             ck = [k for k in await ctx.cookies(API) if k['name'] == 'bq_s']
             check('signOut', c['state'] == 'out' and c['view'] == 'email' and 'signed out' in c['note'] and so['b'] == {} and so['cookie'] and not ck and c['ev'][-1]['n'] == 'account:out' and c['links'] == ['Sign in', 'Sign in']
                   and c['tags'] == ['acSendLink'], dict(c, so=so))
+            sy = await pg.evaluate("[...document.querySelectorAll('[data-sync-link]')].map(b=>b.hidden?'hidden':'shown')")
+            check('syncBackSignedOut', sy == ['shown', 'shown'], sy)
             r = await shot('lastused')
             check('lastUsedFitsPhone', fits(r), r)
             n = await pg.evaluate("async () => (await G.account.fetch('/v1/echo')).status")

@@ -123,6 +123,8 @@ async def main():
             await pg.screenshot(path='/tmp/claude-0/roles-tester-title.png', timeout=180000)
             check('testerTitleLink', v['active'] and v['title'], v)
             check('testerSections', v1['open'] and v1['groups'] == TESTER and v1['heads'] == ['Start from', 'Give', 'Map', 'Teleport'], v1)
+            line = await pg.evaluate("(document.querySelector('#devtools .dt-slot')||{}).textContent||''")   # signed in: the account's save slots, not the guest save
+            check('testerSlotLine', 'save slot' in line and 'real save' not in line, line)
             await pg.keyboard.press('Backquote'); await pg.wait_for_timeout(300)
             v2 = await pg.evaluate("RT.view()")
             await pg.keyboard.press('Backquote'); await pg.wait_for_timeout(300)
