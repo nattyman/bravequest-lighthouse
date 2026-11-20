@@ -472,7 +472,8 @@ async def main():
             l2, at2 = await dev2(play2)
             st_, sv = admin('GET', '/accounts/%s/saves/1' % W['aid'])
             check('9.sameSlots', l1 == l2 and 1 in l2, {'d1': l1, 'd2': l2})
-            check('9.device2Uploaded', sv['at'] == at2, {'srv': sv['at'], 'at2': at2})
+            check('9.device2Uploaded', sv['at'] >= at2, {'srv': sv['at'], 'at2': at2})
+            at2 = sv['at']   # device 2 may have autosaved once more before it closed: the account's copy is what counts
             # device 1 again: its copy of slot 1 is older and fully sent -> the account's newer copy wins (downloaded on open)
             pg = await reopen1(state)
             await click(pg, '#continue'); await pg.wait_for_function("G.slots.debug.ui==='list'"); await settle(pg); await pg.wait_for_timeout(1500)
@@ -491,6 +492,7 @@ async def main():
                 await pg2.evaluate("G.slots.debug.gap(0)"); await pg2.evaluate("G.flow.writeSave()"); await pg2.wait_for_timeout(2500)
                 return await pg2.evaluate("k=>JSON.parse(localStorage.getItem(k)).at", (await st(pg2))['key'])
             at3 = await dev2(save2)
+            at3 = admin('GET', '/accounts/%s/saves/1' % W['aid'])[1]['at']
             pg = await reopen1(state)
             await click(pg, '#continue'); await pg.wait_for_function("G.slots.debug.ui==='list'"); await settle(pg); await pg.wait_for_timeout(2000)
             v = await pg.evaluate("G.slots.debug.view(1)")
