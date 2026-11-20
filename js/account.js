@@ -382,7 +382,9 @@ function buildCard(){
     if(cur==='code'){ const left=Math.ceil((resendAt-Date.now())/1000); cResend.disabled=busy||left>0; }
   }
   async function run(fn){ busy=true; tell('One moment…'); render(); let r; try{ r=await fn(); }catch(_){ r={ok:false,status:0,error:'offline'}; } busy=false; tell(''); render(); return r; }
-  function startTick(){ clearInterval(tick); tick=setInterval(()=>{ if(card.hidden||cur!=='code'){ clearInterval(tick); tick=0; return; } render(); if(Date.now()>=resendAt){ clearInterval(tick); tick=0; render(); } },1000); }
+  function startTick(){ clearInterval(tick);
+    const step=()=>{ if(card.hidden||cur!=='code'){ clearInterval(tick); tick=0; return; } render(); if(Date.now()>=resendAt){ clearInterval(tick); tick=0; } };
+    tick=setInterval(step,1000); setTimeout(step,Math.max(0,resendAt-Date.now())+30); }
   function signedIn(me,how){
     lsSet(LAST,how);
     if(!me||!me.id){ refresh().then(()=>afterSignIn()); return; }

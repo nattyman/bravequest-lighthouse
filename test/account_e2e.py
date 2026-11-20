@@ -265,13 +265,13 @@ async def main():
             check('passwordTyping', snd2['m'] == snd and snd2['v'] == 'secret n N', {'before': snd, 'after': snd2})
             await pg.keyboard.press('Tab'); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()
             check('escapeBack', c['view'] == 'email' and c['open'], c)
-            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()
+            await pg.focus('#acSendLink'); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); c = await card()   # (in a text field the field keeps Escape)
             check('escapeClose', not c['open'] and c['title_shown'], c)
         await step('passwordCard', passwordCard, ('signInCard',))
 
         async def linkFlow():
             await pg.evaluate("G.account.close()"); await pg.wait_for_timeout(200)
-            await pg.evaluate("G.account.debug.resend(1500)")
+            await pg.evaluate("G.account.debug.resend(60000)")
             await click('#title [data-account-link]'); await pg.wait_for_timeout(200)
             await fill('[data-view=email] input', 'not-an-email'); await click('#acSendLink'); await pg.wait_for_timeout(200); c = await card()
             check('badEmailLocal', c['view'] == 'email' and 'doesn’t look like an email' in c['note'] and not fake.reqs('POST', '/v1/auth/start'), c['note'])
@@ -288,6 +288,7 @@ async def main():
             for ch in fake.chal.values(): ch['exp'] = time.time() - 1
             await fill('[data-view=code] input', code); await settle(); c = await card()
             check('expiredCode', 'expired' in c['note'] and c['state'] == 'out' and 'Send it again' in c['buttons'] and 'Send it again' not in c['disabled'], c)
+            await pg.evaluate("G.account.debug.resend(1500)")
             await click('#acResend'); await settle(); c = await card()
             st = fake.reqs('POST', '/v1/auth/start')
             check('resend', len(st) == 2 and st[-1]['b'] == {'email': EMAIL} and 'Sent again' in c['note'], c['note'])
@@ -422,7 +423,7 @@ async def main():
         await step('delete', delete, ('flip401',))
 
         async def rate():
-            await pg.evaluate("G.account.close(); G.account.open('title')"); await pg.wait_for_timeout(300)
+            await pg.evaluate("(async () => { if(G.account.state==='in')await G.account.signOut(); G.account.close(); G.account.open('title'); })()"); await pg.wait_for_timeout(300)
             fake.rate['/v1/auth/start'] = 120
             await fill('[data-view=email] input', EMAIL); await click('#acSendLink'); await settle(); c = await card()
             check('rateLimited', c['view'] == 'email' and 'Wait 2 minutes' in c['note'], c['note'])
@@ -442,7 +443,7 @@ async def main():
         await step('down', down, ('links',))
 
         async def pause():
-            await pg.evaluate("G.account.close()"); await pg.wait_for_timeout(200)
+            await pg.evaluate("(async () => { if(G.account.state==='in')await G.account.signOut(); G.account.close(); })()"); await pg.wait_for_timeout(200)
             await pg.evaluate("document.getElementById('begin').click()"); await pg.wait_for_timeout(1500)
             await pg.evaluate("document.getElementById('pauseBtn').click()"); await pg.wait_for_timeout(400)
             r = await pg.evaluate("[...document.querySelectorAll('#pause .bq-links button')].map(b=>b.textContent)")
