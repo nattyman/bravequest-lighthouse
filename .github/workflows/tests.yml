@@ -21,6 +21,15 @@ jobs:
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
     steps:
+      - name: DIAG api address
+        run: |
+          for ua in "" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"; do
+            for u in https://bravequest-api.numinexstudio.com/health https://bravequest-api.saturnsites.com/health; do
+              echo "== $u UA=[${ua:0:12}]"
+              if [ -n "$ua" ]; then curl -sS -m 20 -A "$ua" -D - -o /tmp/b "$u" | grep -iE "^HTTP|^server|^cf-mitigated|^cf-ray|^content-type" ; else curl -sS -m 20 -D - -o /tmp/b "$u" | grep -iE "^HTTP|^server|^cf-mitigated|^cf-ray|^content-type"; fi
+              head -c 200 /tmp/b | tr -d '\n' | cut -c1-200; echo
+            done
+          done
       - id: m
         shell: python
         env:
