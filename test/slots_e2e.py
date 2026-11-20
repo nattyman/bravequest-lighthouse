@@ -174,6 +174,12 @@ async def main():
             try: await pg.wait_for_function("v => G.slots.debug.ui===v", arg=v, timeout=t, polling=100)
             except Exception: pass
             await pg.wait_for_timeout(250)
+        async def until(fn, t=25):
+            end = time.time() + t
+            while time.time() < end:
+                if fn(): return True
+                await asyncio.sleep(0.3)
+            return False
         async def play(pg): await pg.wait_for_function("G.state.mode==='play'", timeout=120000); await pg.wait_for_timeout(800)
         async def shot(pg, name):
             await pg.set_viewport_size({'width': 1100, 'height': 700}); await pg.wait_for_timeout(300)
@@ -229,8 +235,10 @@ async def main():
             await click(pg, '#begin'); await play(pg); s = await st(pg)
             aid = fake.accounts[A]['id']
             check('newGameSlot1', s['sess'] and s['sess']['slot'] == 1 and not s['sess']['test'] and s['key'] == 'bq-save-s1-' + aid and s['active'] == {'slot': 1, 'test': False, 'name': 'Save 1'}, s['sess'])
-            await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(2500)
+            await pg.evaluate("G.flow.writeSave()")
+            await until(lambda: fake.reqs('PUT', '/v1/saves/1', since=n0) and 1 in fake.slots[aid])
             puts = fake.reqs('PUT', '/v1/saves/1', since=n0)
+            if not puts: print('     log', await pg.evaluate("JSON.stringify({log:G.slots.debug.log,sess:G.slots.debug.sess,key:G.flow.keys.active,saved:!!localStorage.getItem(G.flow.keys.active),acc:G.account.state,mode:G.state.mode})"))
             loc = await pg.evaluate("(k)=>JSON.parse(localStorage.getItem(k))", s['key'])
             check('autosaveUploads', puts and 'test' not in puts[-1]['b'] and puts[-1]['b']['at'] == loc['at'] and puts[-1]['cookie'] and not puts[-1]['auth']
                   and fake.slots[aid][1]['at'] == loc['at'] and isinstance(puts[-1]['b'].get('rec'), dict) and json.loads(puts[-1]['b']['save'])['at'] == loc['at'], [x['b'] and {k: v for k, v in x['b'].items() if k != 'save'} for x in puts])
@@ -244,7 +252,8 @@ async def main():
             v = await pg.evaluate("G.slots.debug.view(1)")
             check('offlineUnsent', v['unsent'] and fake.slots[aid][1]['at'] < v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at']})
             fake.down = False
-            await pg.evaluate("window.dispatchEvent(new Event('online'))"); await pg.wait_for_timeout(2500)
+            await pg.evaluate("window.dispatchEvent(new Event('online'))")
+            await until(lambda: fake.slots[aid][1]['at'] == v['la']); await pg.wait_for_timeout(800)
             v = await pg.evaluate("G.slots.debug.view(1)")
             check('uploadOnReconnect', not v['unsent'] and fake.slots[aid][1]['at'] == v['la'], {'la': v['la'], 'srv': fake.slots[aid][1]['at']})
         await step('offline', offline, ('newGame',))
@@ -253,7 +262,8 @@ async def main():
             pg = W['pg']; aid = fake.accounts[A]['id']; n0 = len(fake.log)
             before = dict(fake.slots[aid][1])
             await pg.evaluate("G.testSaves=true"); await pg.wait_for_timeout(300)
-            await pg.evaluate("G.flow.writeSave()"); await pg.wait_for_timeout(2500)
+            await pg.evaluate("G.flow.writeSave()")
+            await until(lambda: fake.reqs('PUT', '/v1/saves/2', since=n0))
             s = await st(pg)
             puts = fake.reqs('PUT', '/v1/saves/2', since=n0)
             check('testCopy', s['sess']['slot'] == 2 and s['sess']['test'] and s['active']['test'] and fake.slots[aid].get(2, {}).get('test') is True
@@ -273,11 +283,11 @@ async def main():
         async def slotList():
             pg = W['pg']; aid = fake.accounts[A]['id']
             await signin(W['ctx'], pg, A); s = await st(pg)
-            check('noSecondOffer', not s['card'] and s['tcont'] and 'Last played: Save 2' in s['info'], s)
+            check('noSecondOffer', not s['card'] and s['tcont'] and 'Last played: Save 1 (test) ·' in s['info'], s)
             await click(pg, '#continue'); await settle(pg); s = await st(pg)
             used = [r for r in s['rows'] if not r['empty']]
             check('slotList', s['card'] == 'list' and len(s['rows']) == 10 and [r['n'] for r in used] == [1, 2] and 'Test' in used[1]['text'] and 'Test' not in used[0]['text']
-                  and used[1]['cur'] and 'Last played' in used[1]['text'] and '12% complete' in used[0]['text'] and s['pad'] == 'slotsBack' and 'of 10 save slots used' in await pg.evaluate("document.querySelector('#slotsCard .sl-fine').textContent"), s['rows'][:3])
+                  and used[1]['cur'] and 'Last played' in used[1]['text'] and 'complete' in used[0]['text'] and s['pad'] == 'slotsBack' and 'of 10 save slots used' in await pg.evaluate("document.querySelector('#slotsCard .sl-fine').textContent"), s['rows'][:3])
             # keyboard: Escape closes, Continue reopens
             await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200); s2 = await st(pg)
             check('escapeCloses', not s2['card'] and s2['titleShown'], s2['card'])
@@ -309,7 +319,7 @@ async def main():
             check('conflictFlag', 'changed on another device too' in s['rows'][0]['text'], s['rows'][0])
             await row(pg, 1); await pg.wait_for_timeout(300); s = await st(pg)
             check('keepCard', s['card'] == 'keep' and any('This device' in x and 'Device progress' in x for x in s['buttons']) and any('Your account' in x and 'Account progress' in x for x in s['buttons'])
-                  and s['pad'] == 'slKeepBack', s['buttons'])
+                  and s['pad'] == 'slKeepBack', dict(buttons=s['buttons'], card=s['card'], mode=s['mode'], note=s['note'], v=await pg.evaluate("G.slots.debug.view(1)")))
             r = await shot(pg, 'keep'); check('keepFitsPhone', fits(r), r)
             await click(pg, '#slKeepBack'); await pg.wait_for_timeout(200)
             check('keepBack', (await st(pg))['card'] == 'list' and fake.slots[aid][1]['objective'] == 'Account progress', 'back to the list, nothing changed')

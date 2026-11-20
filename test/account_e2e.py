@@ -129,6 +129,7 @@ class Fake:
         if path == '/v1/save' and rq.method == 'GET': return await send(404, {'error': 'no_save'})
         if path == '/v1/event' and rq.method == 'POST': return await send(204)
         if path == '/v1/record': return await send(404, {'error': 'no_save'})
+        if path == '/v1/saves' and rq.method == 'GET': return await send(200 if sess else 401, {'max': 10, 'slots': []} if sess else {'error': 'signed_out'})   # slots.js reads the list on sign-in
         self.other.append(rq.method + ' ' + path); await send(404, {'error': 'not_found'})
 
 async def main():

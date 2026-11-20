@@ -353,7 +353,7 @@ function buildCard(){
   function show(v,o){
     o=o||{}; cur=v; for(const k in V)V[k].hidden=k!==v; card.scrollTop=0; if(!o.keep)tell('');
     card.dataset.padBack=BACK[v]; h.textContent=TITLE[v]; render();
-    if(o.focus!==false)focus(o.focus||defaultFocus(v));
+    if(o.focus!==false)focus((typeof o.focus==='string'?list.querySelector(o.focus):o.focus)||defaultFocus(v));   // a selector: found after the list is drawn
   }
   function defaultFocus(v){
     if(v==='list'){ const id=acct(); const a=id&&activeSlot(id); return list.querySelector('[data-slot="'+a+'"] .sl-main')||list.querySelector('.sl-row:not(.empty) .sl-main')||lNew; }
@@ -430,7 +430,7 @@ function buildCard(){
     await run(()=>put(n)); begin(id,n); });
   kAcc.addEventListener('click',async()=>{ if(busy)return; const id=acct(), n=pick;
     const ok=await run(()=>download(id,n)); if(!ok){ tell('Couldn’t reach your account to fetch its copy. Check your connection and try again.',true); return; } begin(id,n); });
-  kBack.addEventListener('click',()=>show('list',{focus:list.querySelector('[data-slot="'+pick+'"] .sl-main')}));
+  kBack.addEventListener('click',()=>show('list',{focus:'[data-slot="'+pick+'"] .sl-main'}));
   function begin(id,n){
     const m=slotMeta(id,n);
     if(G.testSaves&&!m.test)testCopy(id,n); else setSess({acct:id,slot:n,test:!!m.test});
@@ -438,7 +438,7 @@ function buildCard(){
   }
   function startNew(n){
     const id=acct(); n=n||firstFree(id);
-    if(!n){ show('list',{focus:list.querySelector('.sl-tool.del')||lBack}); tell('All ten save slots are in use. Delete one to make room for a new game.',true); return false; }
+    if(!n){ show('list',{focus:'.sl-tool.del'}); tell('All ten save slots are in use. Delete one to make room for a new game.',true); return false; }
     Object.assign(slotMeta(id,n),{name:'',test:!!G.testSaves,srv:null,sent:0,pend:'',big:false}); lsSet(cacheKey(id,n),null); saveMeta(id);
     setSess({acct:id,slot:n,test:!!G.testSaves}); emit('slots:change');
     close(true); G.flow.begin(false); return true;
@@ -448,13 +448,13 @@ function buildCard(){
   rForm.addEventListener('submit',async e=>{ e.preventDefault(); if(busy)return;
     const nm=cleanName(rIn.value); if(!nm){ tell('Give it a name of 1 to 24 characters.',true); focus(rIn); return; }
     const r=await run(()=>rename(pick,nm));
-    show('list',{focus:list.querySelector('[data-slot="'+pick+'"] [data-act="rename"]')});
+    show('list',{focus:'[data-slot="'+pick+'"] [data-act="rename"]'});
     tell(r&&r.ok?(r.later?'Renamed on this device. Your account gets the new name when it can be reached.':'Renamed to '+nm+'.'):'Couldn’t rename it just now. Try again.',!(r&&r.ok)); });
-  rBack.addEventListener('click',()=>show('list',{focus:list.querySelector('[data-slot="'+pick+'"] [data-act="rename"]')}));
+  rBack.addEventListener('click',()=>show('list',{focus:'[data-slot="'+pick+'"] [data-act="rename"]'}));
   dGo.addEventListener('click',async()=>{ if(busy)return; const n=pick; const r=await run(()=>remove(n));
-    show('list',{focus:list.querySelector('[data-slot="'+n+'"] .sl-main')});
+    show('list',{focus:'[data-slot="'+n+'"] .sl-main'});
     tell(r&&r.ok?'Deleted.':'Couldn’t reach your account, so nothing was deleted. Try again when you’re online.',!(r&&r.ok)); });
-  dBack.addEventListener('click',()=>show('list',{focus:list.querySelector('[data-slot="'+pick+'"] [data-act="delete"]')}));
+  dBack.addEventListener('click',()=>show('list',{focus:'[data-slot="'+pick+'"] [data-act="delete"]'}));
 
   function fillClaim(){
     const g=parse(lsGet((G.flow&&G.flow.keys&&G.flow.keys.save)||'bq-save-v1'));
@@ -576,7 +576,7 @@ function title(){
   const last=vs.find(v=>v.slot===a)||vs.slice().sort((x,y)=>y.at-x.at)[0]||null;
   c.hidden=!vs.length; b.textContent=vs.length?'New game':'Begin'; b.classList.toggle('ghost',!!vs.length);
   info.hidden=false;
-  info.textContent=last?'Last played: '+last.name+(last.test?' (test)':'')+' · '+(last.objective||'')+' · '+ago(last.at)+'. '+vs.length+' of '+MAX+' save slots used.'
+  info.textContent=last?'Last played: '+last.name+(last.test&&!/test/i.test(last.name)?' (test)':'')+' · '+(last.objective||'')+' · '+ago(last.at)+'. '+vs.length+' of '+MAX+' save slots used.'
     :'Signed in. Your games are kept in your account, in up to '+MAX+' save slots.';
   if(rec){ const parts=last?recHTML(last.sv):[]; rec.hidden=!parts.length; rec.innerHTML=parts.join(''); }
   return true;
