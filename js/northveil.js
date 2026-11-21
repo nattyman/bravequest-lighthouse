@@ -18,11 +18,14 @@
        real thing inside 380 m), gone on the crossing's fog leg, on the north island, and in every interior
        (sea cave, Undercroft, Vigil, north cave, fire room).
    Cost: one mesh (four quads, 16 vertices), one draw call, one 512x512 canvas texture made once; per frame only
-   a few numbers change (opacity and 16 vertex colours). Not drawn at all while hidden. Same on every quality tier.
+   a few numbers change (the opacity; the 16 vertex colours are re-sent only when the haze changes). Not drawn at all
+   while hidden. Same on every quality tier (it costs less than a single tree).
    Draw order: transparent, depth-tested, no depth write, renderOrder -5: after the sky (-10) and stars (-9), before
    every other transparent thing (fog wall 1, mist 2, north.js's sprites 0), and the island's terrain, cliffs,
-   tower and trees (opaque, drawn earlier) hide it where they stand in front.
-   API: G.northVeil = { visible, opacity, built, layers, debug:{ show(on), state(), mesh } }
+   tower and trees (opaque, drawn earlier) hide it where they stand in front. Once the core loop runs, fog.js's wall
+   stands between home and the island and is drawn over it, so it reads only faintly through the wall, as the real
+   island would.
+   API: G.northVeil = { visible, opacity, built, layers, towerZ, debug:{ show(on), state(), mesh } }
    ===================================================================== */
 (function(){
 'use strict';
@@ -172,6 +175,6 @@ G.northVeil={
   layers:LAYERS.map(L=>({name:L.name,z:L.z})), towerZ:TOWER_Z,
   debug:{ show(on){ V.force=on==null?null:!!on; }, get mesh(){ return V.mesh; },
     state:()=>({vis:+V.vis.toFixed(3),want:+V.want.toFixed(3),fogK:+V.fogK.toFixed(3),placeK:V.placeK,distK:+V.distK.toFixed(3),why:V.why,
-      shown:!!(V.mesh&&V.mesh.visible),opacity:V.mat?+V.mat.opacity.toFixed(3):0,density:G.scene.fog?+G.scene.fog.density.toFixed(4):null}) }
+      shown:!!(V.mesh&&V.mesh.visible),opacity:V.mat&&V.mesh.visible?+V.mat.opacity.toFixed(3):0,density:G.scene.fog?+G.scene.fog.density.toFixed(4):null}) }
 };
 })();

@@ -145,6 +145,13 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   In a public build with accounts, `G.devtools` exists even for players (so modules can add teleports and start hooks); check `G.devtools.active`
   before offering anything of your own.
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
+- The north island from home (js/northveil.js, after north.js): a soft, hazy silhouette of the real island (northisle.js's
+  height and sea stacks, traced once into three depth layers plus a band of sea mist; the tower in its true plane, so north.js's
+  light at `G.north.pos` sits on it), there from a new game. One mesh, one draw call, one canvas texture; `fog:false`, depth-tested,
+  no depth write, `renderOrder` -5 (after the sky, before every other transparent thing). Colour from `G.scene.fog` each frame;
+  fades out as the fog thickens (forest, beyond the fog wall, the dark tower), and is hidden in every interior, on the crossing's fog
+  leg, on the north island, and when the camera is within ~480 m of it. `G.northVeil = {visible, opacity, built, layers:[{name,z}],
+  towerZ, debug:{show(on|null), state(), mesh}}`; `show(true|false)` forces it, `show(null)` hands back. Nothing is saved.
 
 ## Events (names are fixed)
 | event | data | emitted by |
