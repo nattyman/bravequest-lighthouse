@@ -1174,7 +1174,7 @@ const CSS=`
 .touch [data-act=fox] svg,.touch [data-act=raven] svg{width:28px;height:28px;pointer-events:none}
 .touch [data-act=raven]::after{content:'';position:absolute;inset:-3px;border-radius:50%;pointer-events:none;
   background:conic-gradient(rgba(10,8,14,.72) calc(var(--cd,0)*1turn),transparent 0);opacity:var(--cdo,0);transition:opacity .3s}
-@media (orientation:landscape){ .touch [data-act=fox]{--x:-166px;--y:-57px} .touch [data-act=raven]{--x:-166px;--y:-114px} } /* the outer column, between the potion and the Glass (index.html) */
+@media (orientation:landscape){ .touch [data-act=fox]{--x:-236px;--y:-36px} .touch [data-act=raven]{--x:-236px;--y:-104px} } /* outside the Shut / potion / Glass column, staggered between its rows */
 .prompt .tap{font:700 10.5px var(--body);letter-spacing:.12em;text-transform:uppercase;padding:2px 6px;border:1px solid rgba(241,233,216,.55);border-radius:9px;margin-right:6px}
 `;
 const FOX_SVG='<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M5 4l5 6h8l5-6 1 10c0 5-4 10-10 10S4 19 4 14z" fill="#d0702e" stroke="#2a1d18" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 17c2 1 4 1.2 6 1.2s4-.2 6-1.2c-1 3.6-3.4 5.4-6 5.4S9 20.6 8 17z" fill="#f1e6d2"/><circle cx="10.6" cy="14" r="1.3" fill="#1b120e"/><circle cx="17.4" cy="14" r="1.3" fill="#1b120e"/><path d="M13 19.6h2l-1 1.2z" fill="#151110"/></svg>';

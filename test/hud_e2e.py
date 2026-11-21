@@ -202,7 +202,7 @@ TOUCH_JS=r"""(()=>{ const R=b=>{ const r=b.getBoundingClientRect(); return {x:(r
   G.ui.objective('Get out of the cold','Tamsin in the cellars · Corwin at the chapel door · Wren in the vestry · Hob at the mill');
   const env=document.createElement('div'); env.style.cssText='position:fixed;visibility:hidden;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
   document.body.appendChild(env); const cs=getComputedStyle(env), safe={t:parseFloat(cs.paddingTop),r:parseFloat(cs.paddingRight),b:parseFloat(cs.paddingBottom),l:parseFloat(cs.paddingLeft)}; env.remove();
-  const s=R(btn('attack')), off={}; for(const a of ['jump','interact','roll','lock','shutter'])off[a]=(o=>({dx:Math.round(o.x-s.x),dy:Math.round(o.y-s.y),w:o.w}))(R(btn(a)));
+  const s=R(btn('attack')), off={}; for(const a of ['jump','interact','roll','lock','shutter','sprint'])off[a]=(o=>({dx:Math.round(o.x-s.x),dy:Math.round(o.y-s.y),w:o.w}))(R(btn(a)));
   const top=[...document.querySelectorAll('#pauseBtn,#mapBtn,#hud .hud-top,#hud .quest')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());
   const quest=document.querySelector('#hud .quest').getBoundingClientRect();
   // the layout as it starts (no optional buttons) and with every contextual button shown at once (positions are fixed, so
@@ -214,13 +214,13 @@ TOUCH_JS=r"""(()=>{ const R=b=>{ const r=b.getBoundingClientRect(); return {x:(r
     const all=[...document.querySelectorAll('#touch button')].filter(b=>b.getClientRects().length&&getComputedStyle(b).display!=='none').map(b=>({a:b.dataset.act,...R(b)}));
     const close=[]; for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){ const g=Math.hypot(all[i].x-all[j].x,all[i].y-all[j].y)-(all[i].w+all[j].w)/2; if(g<4)close.push([all[i].a,all[j].a,Math.round(g)]); }
     const offscreen=all.filter(b=>b.l<safe.l||b.t<safe.t||b.r>innerWidth-safe.r||b.b>innerHeight-safe.b).map(b=>b.a);
-    const core=all.filter(b=>['attack','jump','interact','roll','lock','shutter','potion'].includes(b.a));
+    const core=all.filter(b=>['attack','jump','interact','roll','lock','shutter','sprint','potion'].includes(b.a));
     const inStick=core.filter(b=>b.l<innerWidth*.42).map(b=>b.a);
     const overTop=all.filter(b=>top.some(t=>b.l<t.right&&t.left<b.r&&b.t<t.bottom&&t.top<b.b)).map(b=>b.a);
     sets[st]={n:all.length,acts:all.map(b=>b.a),close,offscreen,inStick,overTop,highest:Math.round(Math.min(...all.map(b=>b.t)))};
   }
   hid.forEach(b=>b.hidden=true);
-  // each button fires its own action: the button on top at its centre takes the press, and only its action goes down
+  // each button fires its own action: the button on top at its centre takes the press, and only its action goes down (Sprint's latch is tested where it is built)
   const ACTS=['attack','jump','interact','roll','lock','shutter'], fires={};
   for(const a of ACTS){ const c=R(btn(a)), hit=document.elementFromPoint(c.x,c.y), b=hit&&hit.closest('#touch button');
     if(!b){ fires[a]='nothing at its centre'; continue; }
@@ -237,7 +237,7 @@ LEGEND_JS=r"""(()=>{ const p=document.getElementById('pause'), t=p.querySelector
 async def touch(b):
     """the thumb cluster on a touch phone (no controller): Strike in the corner, Jump right above it and Roll above Jump in one
     column under the right thumb, in portrait and landscape (a playtester on a big phone found Roll too far left in landscape);
-    Jump and Roll a size up but under Strike; in landscape Use / Lock / Shut in a column beside them; nothing touching, nothing
+    Jump and Roll a size up but under Strike; in landscape Use / Sprint / Lock in a column beside them; nothing touching, nothing
     over the objective (at its tallest) or the map/pause buttons, nothing in the safe areas; each button fires its own action;
     the pause menu lists the touch controls on touch and the keyboard legend again once a keyboard is used"""
     only=os.environ.get('TOUCH_ONLY','')
@@ -256,20 +256,22 @@ async def touch(b):
         if land:
             pos=(near(o['jump']['dx'],0) and near(o['roll']['dx'],0)                    # one column: Roll above Jump above Strike
                  and o['roll']['dy']<o['jump']['dy']-60 and o['jump']['dy']<=-80
-                 and near(o['interact']['dx'],-92) and near(o['interact']['dy'],0)      # Use / Lock / Shut: the next column, same rows
-                 and near(o['lock']['dx'],-92) and near(o['lock']['dy'],-86)
-                 and near(o['shutter']['dx'],-92) and near(o['shutter']['dy'],-168))
+                 and near(o['interact']['dx'],-92) and near(o['interact']['dy'],0)      # Use / Sprint / Lock: the next column, same rows
+                 and near(o['sprint']['dx'],-92) and near(o['sprint']['dy'],-86)
+                 and near(o['lock']['dx'],-92) and near(o['lock']['dy'],-168)
+                 and near(o['shutter']['dx'],-172) and near(o['shutter']['dy'],0))    # Shut at the foot of the column after
         else:
             pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)                  # portrait as it was: Jump right above Strike,
                  and near(o['roll']['dx'],0) and near(o['roll']['dy'],-174)             # Roll above Jump,
                  and near(o['interact']['dx'],-96) and near(o['interact']['dy'],0)      # Use left of Strike,
                  and near(o['lock']['dx'],-68) and near(o['lock']['dy'],-68)            # Lock on the diagonal,
-                 and near(o['shutter']['dx'],-83) and near(o['shutter']['dy'],-144))    # Shut above it
+                 and near(o['shutter']['dx'],-83) and near(o['shutter']['dy'],-144)    # Shut above it,
+                 and near(o['sprint']['dx'],-76) and near(o['sprint']['dy'],-228))      # Sprint (new) in the free slot above Shut
         check(f'touch:layout:{tag}',pos and r['device']=='touch',{k:r[k] for k in ('off','device')})
         sizes=(r['strike']>=80 and o['jump']['w']>60 and o['roll']['w']>60 and r['strike']-o['jump']['w']>=12 and r['strike']-o['roll']['w']>=12
-               and o['interact']['w']==60 and o['lock']['w']==60)
+               and o['interact']['w']==60 and o['lock']['w']==60 and o['sprint']['w']==60)
         check(f'touch:sizes:{tag}',sizes,{'strike':r['strike'],**{a:o[a]['w'] for a in o}})
-        clear=all(not v['close'] and not v['offscreen'] and not v['inStick'] and not v['overTop'] for v in r['sets'].values()) and r['sets']['all']['n']>=10
+        clear=all(not v['close'] and not v['offscreen'] and not v['inStick'] and not v['overTop'] for v in r['sets'].values()) and r['sets']['all']['n']>=11
         check(f'touch:clear:{tag}',clear and r['rollTop']>=r['questBottom']+8,{'sets':r['sets'],'safe':r['safe'],'questBottom':r['questBottom'],'rollTop':r['rollTop']})
         check(f'touch:fires:{tag}',all(v=='ok' for v in r['fires'].values()),r['fires'])
         await pg.evaluate("G.headless.draw(3)"); await pg.wait_for_timeout(300); await shot(pg,f'touch-cluster-{tag}')
