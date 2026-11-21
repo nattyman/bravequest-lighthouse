@@ -84,12 +84,12 @@ function buildBoat(){
   const pts2=[V(.4,4.2,0),V(-1.2,2.4,0),V(-2.4,1.05,0)]; g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts2),8,.02,4,false),rope));
   g.position.set(MOOR.x,(G.world.seaLevel||0)-.3,MOOR.z); g.rotation.y=MOOR.yaw;
   G.scene.add(g); g.visible=false; boat=g;
-  moorCol={x:MOOR.x,z:MOOR.z,r:1.4,y0:-4,y1:2}; G.addCollider(moorCol);
+  moorCol={x:MOOR.x,z:MOOR.z,r:1.4,y0:-4,y1:2,_off:true}; applyBuilt();   // added by applyBuilt only while she's drawn
 }
 /* where she's moored: the south beach (home) or the north island's cove (northisle.js moves her there and back) */
 let moorCol=null;
 function moorAt(x,z,yaw){ if(!boat)return; boat.position.x=x; boat.position.z=z; boat.rotation.y=yaw;
-  if(moorCol){ G.removeCollider(moorCol); moorCol.x=x; moorCol.z=z; G.addCollider(moorCol); } }
+  if(moorCol){ if(!moorCol._off)G.removeCollider(moorCol); moorCol.x=x; moorCol.z=z; if(!moorCol._off)G.addCollider(moorCol); } }
 function moorHome(){ moorAt(MOOR.x,MOOR.z,MOOR.yaw); }
 const atHome=()=>!(G.northIsle&&G.northIsle.at==='north');
 
@@ -147,6 +147,8 @@ function applyBuilt(){
   const w=G.world.wreck; if(w&&w.hull)w.hull.visible=!S.built;
   if(w&&w.hullColliders){ for(const c of w.hullColliders){ if(S.built&&!c._off){ G.removeCollider(c); c._off=true; } else if(!S.built&&c._off){ G.addCollider(c); c._off=false; } } }
   if(boat)boat.visible=S.built;
+  // the moored boat's collider is there only while she is: before she's patched it was an invisible post in the shallows off the south beach
+  if(moorCol){ if(S.built&&moorCol._off){ G.addCollider(moorCol); moorCol._off=false; } else if(!S.built&&!moorCol._off){ G.removeCollider(moorCol); moorCol._off=true; } }
 }
 function sailNorth(){
   // the crossing (a short scripted sail through the fog): northisle.js
