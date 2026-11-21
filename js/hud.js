@@ -495,7 +495,7 @@ const POT_CSS=`
 .touch [data-act=potion] svg{width:20px;height:26px;pointer-events:none}
 .touch [data-act=potion] b{position:absolute;right:-2px;bottom:-2px;min-width:19px;height:19px;border-radius:10px;background:#6c3f5f;color:var(--bone);font:700 12px/19px var(--body);text-align:center;pointer-events:none}
 .touch [data-act=potion].empty{opacity:.45}
-@media (orientation:landscape){ .touch [data-act=potion]{--x:-62px;--y:-150px} }
+@media (orientation:landscape){ .touch [data-act=potion]{--x:-172px;--y:-72px} }   /* above the lantern shutter (index.html) */
 /* narrow phones: the pause button sits top-centre, so the bottle goes under the hearts instead of beside them */
 @media (max-width:480px){ .hp-row{flex-direction:column;align-items:flex-start;gap:4px} }
 `;
@@ -584,7 +584,7 @@ const GLASS_CSS=`
 .touch [data-act=glass][hidden]{display:none}
 .touch [data-act=glass] svg{width:24px;height:24px;pointer-events:none}
 .touch [data-act=glass].up{background:rgba(145,80,255,.5);box-shadow:0 0 14px rgba(170,120,255,.6)}
-@media (orientation:landscape){ .touch [data-act=glass]{--x:-150px;--y:-168px} }   /* beside the lantern shutter */
+@media (orientation:landscape){ .touch [data-act=glass]{--x:-172px;--y:-140px} }   /* above the potion, over the lantern shutter */
 `;
 const GLASS_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="rgba(214,188,255,.18)" stroke="#f1e9d8" stroke-width="1.8"/><circle cx="10" cy="10" r="8.6" fill="none" stroke="#c8a24c" stroke-width="1"/><path d="M15.2 15.2L21 21" stroke="#c8a24c" stroke-width="2.4" stroke-linecap="round"/><path d="M7 6.5l3 2-1.4 3.2M10 8.5l3.4-.6" fill="none" stroke="#f1e9d8" stroke-width=".9" opacity=".75"/></svg>';
 let glassBtn=null, glassLegend=false;
