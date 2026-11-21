@@ -615,9 +615,9 @@ function updateGlassUI(dt){
 
 /* ---------- the pause menu's touch legend ([data-touch-legend]): on a touch device it replaces the keyboard legend there.
    Same device rule as the prompts (usingTouch, beside keyCap). ---------- */
-const TOUCH_DOES={attack:'strike, hold to charge',jump:'jump, hold to glide',roll:'dodge roll',lock:'lock on',interact:'interact',
+const TOUCH_DOES={attack:'strike, hold to charge',jump:'jump, hold to glide',roll:'dodge roll',sprint:'sprint, tap to keep running',lock:'lock on',interact:'interact',
   shutter:'lantern shutter',potion:'drink a draught',glass:'hold to raise the Remembering Glass'};
-const TOUCH_ORDER=['attack','jump','roll','lock','interact','shutter','potion','glass','fox','raven'];
+const TOUCH_ORDER=['attack','jump','roll','sprint','lock','interact','shutter','potion','glass','fox','raven'];
 function touchChip(b){
   const svg=b.querySelector('svg');
   if(svg)return `<b class="tb icon" aria-label="${esc(b.getAttribute('aria-label')||'')}">${svg.outerHTML}</b>`;
@@ -647,9 +647,57 @@ G.on('mode',e=>{ if(e&&e.mode==='paused')refreshTouchLegend(); });
 G.on('input:device',refreshTouchLegend);
 refreshTouchLegend();
 
+/* ---------- touch Sprint: tap to latch, hold for a burst. It only ever drives the same 'sprint' input Shift and LB feed, so
+   speed, stamina, exhaustion, the Dashing Sweep, the sprint pose and the camera's FOV all come from player.js unchanged.
+   A press sends sprint at once. Lifted within SPR.tap s it was a tap: sprint stays down (latched) until another tap, the
+   stick resting near centre for SPR.rest s (a flick through centre to turn doesn't count; tapped before moving, it waits SPR.arm s
+   for the stick), exhaustion, or the game taking
+   control (cut scene, card or pause, death, a scripted move: anything that turns P.inputEnabled off). Held longer it was a
+   hold: sprint until the lift, and the lift also ends a latch. Lock-on and a charged strike keep the latch armed: player.js
+   won't sprint through them and the run picks up again after, as it does for a held Shift. Nothing here is saved.
+   Layout (where the button sits) is index.html's .touch block; only its state looks live here. ---------- */
+const SPRINT_CSS=`
+.touch [data-act=sprint][aria-pressed="true"]{background:rgba(145,80,255,.5);border-color:var(--ether);box-shadow:0 0 14px rgba(170,120,255,.6)}
+.touch [data-act=sprint].tired{opacity:.4;filter:saturate(.35)}
+`;
+const SPR={tap:.25,rest:.35,arm:1.5,still:.2,moving:.3};
+const spr={btn:null,latched:false,id:null,downAt:0,wasLatched:false,restT:0,moved:false,tired:null,shown:null};
+const sprintCtl=()=>{ const P=G.player; return G.state.mode==='play'&&!!P&&P.alive!==false&&P.inputEnabled!==false&&!(G.cine&&G.cine.on); };
+function sprintShow(){ const b=spr.btn; if(!b)return; const P=G.player, tired=!!(P&&P.exhausted), on=spr.latched;
+  if(on!==spr.shown){ spr.shown=on; b.setAttribute('aria-pressed',on?'true':'false'); }
+  if(tired!==spr.tired){ spr.tired=tired; b.classList.toggle('tired',tired); } }
+function sprintOff(){ spr.latched=false; spr.id=null; spr.restT=0; if(spr.btn)spr.btn.classList.remove('on'); G.input.setVirtual('sprint',false); sprintShow(); }
+(function mountSprint(){
+  const st=document.createElement('style'); st.textContent=SPRINT_CSS; document.head.appendChild(st);
+  const b=document.querySelector('#touch button[data-act=sprint]'); if(!b)return; spr.btn=b;
+  b.setAttribute('aria-pressed','false');
+  b.addEventListener('pointerdown',e=>{ e.preventDefault(); if(spr.id!=null)return;
+    spr.id=e.pointerId; spr.downAt=performance.now(); spr.wasLatched=spr.latched; b.classList.add('on'); G.input.setVirtual('sprint',true); });
+  const up=e=>{ if(spr.id==null||e.pointerId!==spr.id)return; spr.id=null; b.classList.remove('on');
+    const tap=e.type==='pointerup'&&performance.now()-spr.downAt<SPR.tap*1000;
+    spr.latched=tap&&!spr.wasLatched&&sprintCtl()&&!(G.player&&G.player.exhausted); spr.restT=0; spr.moved=G.input.move().mag>=SPR.moving;
+    if(!spr.latched)G.input.setVirtual('sprint',false); sprintShow(); };
+  // touch pointers are captured by the button they went down on, so a thumb sliding off it still ends here, on the lift
+  b.addEventListener('pointerup',up); b.addEventListener('pointercancel',up);
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+})();
+G.system('touchSprint',{order:19,modes:'always',update(dt){   // before player.js (20) so a drop takes effect this frame
+  if(!spr.btn)return;
+  if((spr.latched||spr.id!=null)&&!sprintCtl())sprintOff();     // the game took control: the press is spent too
+  else if(spr.latched&&spr.id==null){
+    if(G.player&&G.player.exhausted)sprintOff();
+    else{ const m=G.input.move().mag; if(m>=SPR.moving)spr.moved=true;
+      spr.restT=m<SPR.still?spr.restT+(dt||0):0; if(spr.restT>=(spr.moved?SPR.rest:SPR.arm))sprintOff(); }
+  }
+  sprintShow();
+}});
+/** tests: the touch Sprint button's state */
+G.ui.touchSprint=()=>({latched:spr.latched,held:spr.id!=null,tired:!!spr.tired,pressed:spr.btn?spr.btn.getAttribute('aria-pressed'):null,
+  shown:!!(spr.btn&&spr.btn.getClientRects().length)});
+
 /* ---------- touch buttons ---------- */
 document.querySelectorAll('#touch button').forEach(b=>{
-  const a=b.dataset.act;
+  const a=b.dataset.act; if(a==='sprint')return; // its own handlers, above
   b.addEventListener('pointerdown',e=>{e.preventDefault();b.classList.add('on');G.input.setVirtual(a,true);});
   const up=e=>{b.classList.remove('on');G.input.setVirtual(a,false);};
   b.addEventListener('pointerup',up); b.addEventListener('pointercancel',up); b.addEventListener('pointerleave',up);
