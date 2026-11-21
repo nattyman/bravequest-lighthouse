@@ -103,9 +103,11 @@ function updateWake(dt){
   const drop=()=>{ const w=wake; wake=null; G.emit('wake:done',{from:w.from.clone(),windows:!!w.wreck&&w.coat,early:true}); };
   if(!['cottage','door'].includes(G.quest.step)){ drop(); return; }
   const c=G.ui.captions?G.ui.captions():null; if(c&&(c.cur||c.queue.length))return;
-  // anything else said since (the game moved on, or a test took over the captions): the rest of the opening is dropped
-  const last=()=>{ const M=G.ui.messages?G.ui.messages():[], e=M[M.length-1]; return e?e.text+'|'+e.n+'|'+M.length:''; };
-  if(wake.n!=null&&last()!==wake.n){ drop(); return; }
+  // anything else said since (the game moved on, or a test took over the captions): the rest of the opening is dropped.
+  // A low-priority aside does not count (the waystone at the foot of the cliff path marks itself on the chart as he
+  // walks past it, and used to cut his thoughts off after the first)
+  const M=()=>G.ui.messages?G.ui.messages():[], last=()=>{ const m=M(), e=m[m.length-1]; return e?e.text+'|'+e.n+'|'+m.length:''; };
+  if(wake.n!=null&&last()!==wake.n){ const m=M(), e=m[m.length-1]; if(e&&e.pri===0)wake.n=last(); else { drop(); return; } }
   const line=wake.lines.shift(); G.ui.say(line,null,{key:'wake'}); wake.n=last(); wake.t=1.2;
   if(!wake.lines.length){ wakeEnd={text:line,from:wake.from,windows:/cottage windows/.test(line)&&!!wake.wreck,seen:false,t:0}; wake=null; }
 }

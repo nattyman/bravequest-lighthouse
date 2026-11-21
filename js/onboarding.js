@@ -333,5 +333,5 @@ G.persist&&G.persist.register('onboarding',{
 // a save from before this module: an already-fed lamp or a cured lighthouse means those moments have passed
 G.on('loop:start',e=>{ try{ if(G.fog&&G.fog._persist&&G.fog._persist.save().fed)S.seen.ether=1; }catch(_){} });
 
-if(G.debug)G._onb={S,C,cureShot,etherShot,riseSpot,openingShot,routeUp,alongRoute,openingWhere,atCottage,get owed(){ return owed; }};
+if(G.debug)G._onb={S,C,cureShot,etherShot,riseSpot,openingShot,routeUp,alongRoute,routeAt,openingWhere,atCottage,rocks,rockHit,get owed(){ return owed; }};
 })();
