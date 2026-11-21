@@ -136,7 +136,9 @@ kbd{font-family:var(--body);font-weight:700;font-size:11.5px;min-width:21px;heig
 #toast.show{opacity:1}
 
 /* touch controls — a fixed thumb cluster in the bottom-right corner, out of the HUD flow so it can never wrap left.
-   Strike sits in the corner; Jump sits right above it (landscape and portrait); the others arc around it (offsets are from Strike's centre). The left 42% stays free for the stick. */
+   Strike sits in the corner with Jump right above it and Roll above Jump, so the right thumb strikes, jumps and rolls
+   without travelling (portrait and landscape alike); the others sit to their left (offsets are from Strike's centre).
+   The left 42% stays free for the stick. */
 .touch{display:none;position:fixed;z-index:5;pointer-events:none;
   right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));width:84px;height:84px}
 .touch button{--s:60px;position:absolute;left:calc(42px + var(--x,0px) - var(--s)/2);top:calc(42px + var(--y,0px) - var(--s)/2);
@@ -154,10 +156,15 @@ kbd{font-family:var(--body);font-weight:700;font-size:11.5px;min-width:21px;heig
 .touch [data-act=interact]{--x:-96px;--y:0px}
 .touch [data-act=roll]{--x:0px;--y:-174px}
 .touch [data-act=shutter]{--x:-83px;--y:-144px}
-/* landscape: arc leftward so the cluster stays low and clear of the objective */
+/* landscape: the same Strike / Jump / Roll column under the right thumb (a touch tighter: a phone on its side is short,
+   and Roll must stay under the objective on a 375px-high screen), then a column of Use / Lock / Shut beside it and,
+   further left, the small earned buttons (potion, companions, Glass: hud.js, companions.js). Rows line up, so it reads as a grid */
 @media (orientation:landscape){
-  .touch [data-act=roll]{--x:-170px;--y:0px}
-  .touch [data-act=shutter]{--x:-144px;--y:-83px}
+  .touch [data-act=jump]{--x:0px;--y:-92px}
+  .touch [data-act=roll]{--x:0px;--y:-170px}
+  .touch [data-act=interact]{--x:-92px;--y:0px}
+  .touch [data-act=lock]{--x:-92px;--y:-86px}
+  .touch [data-act=shutter]{--x:-92px;--y:-168px}
 }
 .stick{position:fixed;left:0;top:0;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;pointer-events:none;
   border:2px solid rgba(241,233,216,.28);background:radial-gradient(circle,rgba(20,15,26,.05) 40%,rgba(20,15,26,.22));opacity:0;transition:opacity .15s}
@@ -166,7 +173,7 @@ kbd{font-family:var(--body);font-weight:700;font-size:11.5px;min-width:21px;heig
   background:rgba(241,233,216,.22);border:1px solid rgba(241,233,216,.45)}
 @media (pointer:coarse){
   .touch{display:block}.keys{display:none}
-  /* caption stays left of the cluster (cluster is ~210px wide in portrait, ~290px in landscape) */
+  /* caption stays left of the cluster (cluster is ~210px wide in portrait, ~250px in landscape) */
   .capstack{max-width:min(540px,calc(100% - 230px))}
   .caption p{font-size:16px;line-height:1.4}
   .prompt{bottom:calc(max(30%,280px) + env(safe-area-inset-bottom,0px))}
@@ -175,7 +182,7 @@ kbd{font-family:var(--body);font-weight:700;font-size:11.5px;min-width:21px;heig
   .caption.show .capnext{pointer-events:auto;padding:10px 8px 10px 18px;margin:-4px -14px -14px auto;width:max-content}
 }
 @media (pointer:coarse) and (orientation:landscape){
-  .capstack{max-width:min(540px,calc(100% - 300px))}
+  .capstack{max-width:min(540px,calc(100% - 260px))}
   .prompt{bottom:calc(max(30%,140px) + env(safe-area-inset-bottom,0px))}
 }
 /* narrow portrait phones: no room beside the cluster, so the caption moves up under the hearts/objective (below the boss bar when shown) */
