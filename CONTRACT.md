@@ -88,6 +88,9 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   `G.audio.music.setOverride` state for the shot, e.g. `'wistful'`, restored after), `handBack:{yaw,pitch}` (or a fn) for the follow camera,
   `fadeOut` (s, dip to black at the end). Read-outs: `G.cine.on/id/safe/clean/t/dur/seen(id)`, `G.cine.skip()`. Event `cine` {on,id}.
   Game time only (deterministic under `G.step`, runs under `?headless`). Tests skip shots with `G.cine.skip()`.
+  The opening shot (`'opening'`, after `wake:done` with `windows`) is owed until it plays: it waits for a calm moment (no card, boss,
+  map, fall, roll, hurt or death) and plays wherever Rowan is (from the sand, partway up the cliff path, or on the headland: the reveal
+  alone), handing back facing on along the route. It is let go once he is at the cottage or the step has moved past `cottage`.
 - Pickups (flow.js implements): `G.pickups.spawn('heart'|'mushroom', pos)`.
 - Companions (js/companions.js, COMPANIONS.md): `G.companions = {ember, corvin, has(id), send(id), call(id), spots, shardSpots, names, raven, debug}`;
   `send('ember')` = R (at a fox spot: go; else heel), `send('corvin')` = T (at a raven spot: go; else scout, 45 s cooldown). Hooks it uses:
@@ -145,6 +148,13 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   In a public build with accounts, `G.devtools` exists even for players (so modules can add teleports and start hooks); check `G.devtools.active`
   before offering anything of your own.
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
+- The north island from home (js/northveil.js, after north.js): a soft, hazy silhouette of the real island (northisle.js's
+  height and sea stacks, traced once into three depth layers plus a band of sea mist; the tower in its true plane, so north.js's
+  light at `G.north.pos` sits on it), there from a new game. One mesh, one draw call, one canvas texture; `fog:false`, depth-tested,
+  no depth write, `renderOrder` -5 (after the sky, before every other transparent thing). Colour from `G.scene.fog` each frame;
+  fades out as the fog thickens (forest, beyond the fog wall, the dark tower), and is hidden in every interior, on the crossing's fog
+  leg, on the north island, and when the camera is within ~480 m of it. `G.northVeil = {visible, opacity, built, layers:[{name,z}],
+  towerZ, debug:{show(on|null), state(), mesh}}`; `show(true|false)` forces it, `show(null)` hands back. Nothing is saved.
 
 ## Events (names are fixed)
 | event | data | emitted by |
@@ -172,7 +182,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `stag:engage` | — | monsters (the Hollow Stag leaves its guard over Hesper's lantern) |
 | `finale:start` | — | flow (when you step outside after lamp:cured); finale_boss.js answers it — the Stag no longer does |
 | `boss:dead` | {who:'stag'\|'gloaming'} | monsters (stag) / finale_boss (gloaming). Only `who:'gloaming'` ends Act 1 |
-| `wake:done` | {from, windows} | flow (the new game's opening lines on the beach have finished; onboarding.js plays the opening shot) |
+| `wake:done` | {from, windows, early} | flow (the new game's opening lines have finished, wherever he is; `early` when the rest were dropped because the game moved on or something else was said; `windows` = the beach start before the cloak. onboarding.js owes the opening shot; record.js marks 'ashore') |
 | `map:waypoint` | {id, quiet} | map (a waystone unlocked; quiet = granted from an old save / home) |
 | `map:travel` | {id, phase:'start'\|'arrive'\|'done'} | map (fast travel: fade out → moved → faded back in) |
 | `companion:earned` | {id:'ember'\|'corvin', quiet} | companions (quiet = granted from an old save / a load) |

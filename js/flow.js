@@ -92,16 +92,22 @@ function updateAttract(dt){
    descend/finale ('finale:start'; finale_boss.js builds the Gloaming) → done on boss:dead {who:'gloaming'}. */
 let wake=null;   // the opening lines on the beach, still to say
 let wakeEnd=null; // the last of them, on screen: when it has gone, 'wake:done' (onboarding.js plays the opening shot)
-/* the opening: each line waits for the one before to finish; anything left unsaid is dropped once you've moved on */
+/* the opening: each line waits for the one before to finish, wherever he has run to (they are his thoughts, and the
+   opening shot comes after the last of them: dropping them on distance meant a quick runner never saw it). They are only
+   dropped when the game has moved on: the step is past the cottage, or something else has been said since (a card, the
+   cottage's own line, a test). Either way 'wake:done' still goes out ({early:true} when dropped), so the record still
+   marks him ashore and onboarding.js still decides about the shot. */
 function updateWake(dt){
   if(!wake)return;
   if((wake.t-=dt||0)>0)return;
-  const P=G.player, far=P&&P.pos&&Math.hypot(P.pos.x-wake.from.x,P.pos.z-wake.from.z)>70;
-  if(far||!['cottage','door'].includes(G.quest.step)){ wake=null; return; }
+  const drop=()=>{ const w=wake; wake=null; G.emit('wake:done',{from:w.from.clone(),windows:!!w.wreck&&w.coat,early:true}); };
+  if(!['cottage','door'].includes(G.quest.step)){ drop(); return; }
   const c=G.ui.captions?G.ui.captions():null; if(c&&(c.cur||c.queue.length))return;
-  // anything else said since (the game moved on, or a test took over the captions): the rest of the opening is dropped
-  const last=()=>{ const M=G.ui.messages?G.ui.messages():[], e=M[M.length-1]; return e?e.text+'|'+e.n+'|'+M.length:''; };
-  if(wake.n!=null&&last()!==wake.n){ wake=null; return; }
+  // anything else said since (the game moved on, or a test took over the captions): the rest of the opening is dropped.
+  // A low-priority aside does not count (the waystone at the foot of the cliff path marks itself on the chart as he
+  // walks past it, and used to cut his thoughts off after the first)
+  const M=()=>G.ui.messages?G.ui.messages():[], last=()=>{ const m=M(), e=m[m.length-1]; return e?e.text+'|'+e.n+'|'+m.length:''; };
+  if(wake.n!=null&&last()!==wake.n){ const m=M(), e=m[m.length-1]; if(e&&e.pri===0)wake.n=last(); else { drop(); return; } }
   const line=wake.lines.shift(); G.ui.say(line,null,{key:'wake'}); wake.n=last(); wake.t=1.2;
   if(!wake.lines.length){ wakeEnd={text:line,from:wake.from,windows:/cottage windows/.test(line)&&!!wake.wreck,seen:false,t:0}; wake=null; }
 }
@@ -126,6 +132,7 @@ function halPos(){ const h=G.creatures&&G.creatures.halloran; return h&&h.pos?h.
 function stagEdge(){ const t=LM().resistingTree||{x:-165,z:5}, x=t.x+39, z=t.z+2; return V(x,G.world.height(x,z),z); }
 function begin(fromSave){
   if(G.slots&&G.slots.beginning)G.slots.beginning(fromSave);   // signed in: which save slot this game uses (slots.js)
+  wake=null; wakeEnd=null;   // a new game's opening lines left over from before (back to the title, then Continue) are not this game's
   $('title').hidden=true; $('hud').hidden=false; $('pauseBtn').hidden=false;
   const save=fromSave===true?readSave():(fromSave&&typeof fromSave==='object'?fromSave:null); // devtools.js passes a built save object
   if(save){
@@ -150,7 +157,7 @@ function begin(fromSave){
         :'“Told her I’d be home for the spring fair.” It’s autumn. A path climbs off the sand toward the headland.'
   ]:[coat?'You wake on cold stone at the top of a sea cliff, shivering. Fog is rolling in off the water. The great lamp of the lighthouse is dark, and something darker turns slowly around it. But there is warm light in the cottage windows.'
         :'You wake on cold stone at the top of a sea cliff. Fog is rolling in off the water. Above you, the great lamp of the lighthouse is dark, and something darker turns slowly around it.'];
-  wakeEnd=null; wake={lines:open,t:.6,from:V(st.x,st.y,st.z),wreck:!!wr};   // said one at a time as the captions come free (updateWake)
+  wakeEnd=null; wake={lines:open,t:.6,from:V(st.x,st.y,st.z),wreck:!!wr,coat:!!coat};   // said one at a time as the captions come free (updateWake)
 }
 function cottageDoor(){ const c=LM().cottageDoor||LM().cottage; return c?V(c.x,c.y,c.z):lmV('lighthouse',V(180,42,0)).add(V(-22,0,24)); }
 function onCloak(){
