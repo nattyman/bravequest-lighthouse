@@ -2,8 +2,9 @@
 the stamina wheel (hidden at full, green / amber / exhausted / refill pulse) and the controller status (standard pad,
 non-standard Xbox layout, a ghost pad listed first, a null entry, a SecurityError, a permissions policy that forbids
 'gamepad', no pads), including A starting the game from the title; the touch buttons on a phone (where each sits, sizes,
-nothing overlapping, each firing its own action) and the pause menu's touch legend.
-Screenshots go to /tmp/claude-0/hud/ (desktop 1280x760, phone portrait 390x844 and landscape 844x390).
+nothing overlapping, clear of the objective, the map/pause buttons and the safe areas, at four landscape phone sizes, a
+landscape tablet and portrait, each firing its own action) and the pause menu's touch legend.
+Screenshots go to /tmp/claude-0/hud/ (desktop 1280x760, phone portrait 390x844 and landscape 844x390, the touch cluster at each size).
 usage: python3 test/hud_e2e.py [url]   (default http://localhost:8800/dev.html?debug&headless)
 """
 import asyncio, sys, time, json, os
@@ -56,7 +57,7 @@ async def shot(pg,name):
     await pg.evaluate("(()=>{ for(const a of document.getAnimations()){ try{ if(a.effect&&a.effect.getTiming().iterations!==Infinity)a.finish(); }catch(_){} } G.headless&&G.headless.draw(3); })()"); await pg.wait_for_timeout(300)
     await pg.screenshot(path=f'{OUT}/{name}.png',timeout=120000)
 
-async def boot(b,kind=None,view=None,mobile=False,reduce=False):
+async def boot(b,kind=None,view=None,mobile=False,reduce=False,insets=None):
     errs=[]
     kw=dict(viewport=view or {'width':1280,'height':760})
     if mobile: kw.update(is_mobile=True,has_touch=True,device_scale_factor=2)
@@ -64,6 +65,8 @@ async def boot(b,kind=None,view=None,mobile=False,reduce=False):
     ctx=await b.new_context(**kw)
     if kind: await ctx.add_init_script(pad_js(kind))
     pg=await ctx.new_page()
+    if insets:   # a notched phone's safe areas (top,right,bottom,left), so env(safe-area-inset-*) is what the phone reports
+        t,r,bt,l=insets; await (await ctx.new_cdp_session(pg)).send('Emulation.setSafeAreaInsetsOverride',{'insets':{'top':t,'right':r,'bottom':bt,'left':l}})
     pg.on('pageerror',lambda e:errs.append('pageerror: '+str(e)))
     pg.on('console',lambda m:errs.append('console: '+m.text) if m.type=='error' and '404' not in m.text else None)
     await pg.goto(URL,timeout=180000); await pg.wait_for_timeout(5000)
@@ -195,25 +198,36 @@ async def pads(b):
 
 TOUCH_JS=r"""(()=>{ const R=b=>{ const r=b.getBoundingClientRect(); return {x:(r.left+r.right)/2,y:(r.top+r.bottom)/2,w:r.width,l:r.left,t:r.top,r:r.right,b:r.bottom}; };
   const btn=a=>document.querySelector(`#touch button[data-act="${a}"]`);
-  const s=R(btn('attack')), off={}; for(const a of ['jump','interact','roll','lock','shutter'])off[a]=(o=>({dx:Math.round(o.x-s.x),dy:Math.round(o.y-s.y),w:o.w}))(R(btn(a)));
-  // every contextual button shown at once: no two circles may touch, all on screen, none in the stick's left 42%, none over the top HUD
-  const hid=[...document.querySelectorAll('#touch button')].filter(b=>b.hidden); hid.forEach(b=>b.hidden=false);
-  const all=[...document.querySelectorAll('#touch button')].filter(b=>b.getClientRects().length).map(b=>({a:b.dataset.act,...R(b)}));
-  const close=[]; for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){ const g=Math.hypot(all[i].x-all[j].x,all[i].y-all[j].y)-(all[i].w+all[j].w)/2; if(g<4)close.push([all[i].a,all[j].a,Math.round(g)]); }
-  const offscreen=all.filter(b=>b.l<0||b.t<0||b.r>innerWidth||b.b>innerHeight).map(b=>b.a);
-  const core=all.filter(b=>['attack','jump','interact','roll','lock','shutter','potion'].includes(b.a));
-  const inStick=core.filter(b=>b.l<innerWidth*.42).map(b=>b.a);
-  const top=[...document.querySelectorAll('#pauseBtn,#mapBtn,#hud .hud-top')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());
-  const overTop=all.filter(b=>top.some(t=>b.l<t.right&&t.left<b.r&&b.t<t.bottom&&t.top<b.b)).map(b=>b.a);
+  // the longest objective sub-line in the game (two lines on a phone), so the block is as tall as it gets
+  G.ui.objective('Get out of the cold','Tamsin in the cellars · Corwin at the chapel door · Wren in the vestry · Hob at the mill');
+  const env=document.createElement('div'); env.style.cssText='position:fixed;visibility:hidden;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+  document.body.appendChild(env); const cs=getComputedStyle(env), safe={t:parseFloat(cs.paddingTop),r:parseFloat(cs.paddingRight),b:parseFloat(cs.paddingBottom),l:parseFloat(cs.paddingLeft)}; env.remove();
+  const s=R(btn('attack')), off={}; for(const a of ['jump','interact','roll','lock','shutter','sprint'])off[a]=(o=>({dx:Math.round(o.x-s.x),dy:Math.round(o.y-s.y),w:o.w}))(R(btn(a)));
+  const top=[...document.querySelectorAll('#pauseBtn,#mapBtn,#hud .hud-top,#hud .quest')].filter(e=>e.getClientRects().length).map(e=>e.getBoundingClientRect());
+  const quest=document.querySelector('#hud .quest').getBoundingClientRect();
+  // the layout as it starts (no optional buttons) and with every contextual button shown at once (positions are fixed, so
+  // that covers every mix of them): no two circles may touch, all on screen and inside the safe areas, none in the stick's
+  // left 42%, none over the objective or the map/pause buttons
+  const sets={}, hid=[...document.querySelectorAll('#touch button')].filter(b=>b.hidden);
+  for(const st of ['basic','all']){
+    if(st==='all')hid.forEach(b=>b.hidden=false);
+    const all=[...document.querySelectorAll('#touch button')].filter(b=>b.getClientRects().length&&getComputedStyle(b).display!=='none').map(b=>({a:b.dataset.act,...R(b)}));
+    const close=[]; for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){ const g=Math.hypot(all[i].x-all[j].x,all[i].y-all[j].y)-(all[i].w+all[j].w)/2; if(g<4)close.push([all[i].a,all[j].a,Math.round(g)]); }
+    const offscreen=all.filter(b=>b.l<safe.l||b.t<safe.t||b.r>innerWidth-safe.r||b.b>innerHeight-safe.b).map(b=>b.a);
+    const core=all.filter(b=>['attack','jump','interact','roll','lock','shutter','sprint','potion'].includes(b.a));
+    const inStick=core.filter(b=>b.l<innerWidth*.42).map(b=>b.a);
+    const overTop=all.filter(b=>top.some(t=>b.l<t.right&&t.left<b.r&&b.t<t.bottom&&t.top<b.b)).map(b=>b.a);
+    sets[st]={n:all.length,acts:all.map(b=>b.a),close,offscreen,inStick,overTop,highest:Math.round(Math.min(...all.map(b=>b.t)))};
+  }
   hid.forEach(b=>b.hidden=true);
-  // each button fires its own action: the button on top at its centre takes the press, and only its action goes down
+  // each button fires its own action: the button on top at its centre takes the press, and only its action goes down (Sprint's latch is tested where it is built)
   const ACTS=['attack','jump','interact','roll','lock','shutter'], fires={};
   for(const a of ACTS){ const c=R(btn(a)), hit=document.elementFromPoint(c.x,c.y), b=hit&&hit.closest('#touch button');
     if(!b){ fires[a]='nothing at its centre'; continue; }
     b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerType:'touch'}));
     const down=ACTS.filter(x=>G.input.down(x)); b.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch'}));
     fires[a]=b.dataset.act===a&&down.length===1&&down[0]===a?'ok':{hit:b.dataset.act,down}; }
-  return {strike:s.w,off,close,offscreen,inStick,overTop,fires,device:G.input.device}; })()"""
+  return {strike:s.w,off,sets,safe,questBottom:Math.round(quest.bottom),rollTop:Math.round(R(btn('roll')).t),fires,device:G.input.device}; })()"""
 
 LEGEND_JS=r"""(()=>{ const p=document.getElementById('pause'), t=p.querySelector('[data-touch-legend]'), k=p.querySelector('[data-kb-legend]'), pl=p.querySelector('[data-pad-legend]');
   const vis=e=>!!e&&!e.hidden&&e.getClientRects().length>0;
@@ -221,28 +235,44 @@ LEGEND_JS=r"""(()=>{ const p=document.getElementById('pause'), t=p.querySelector
     chips:t?[...t.querySelectorAll('.tb')].map(c=>c.textContent.trim()||'icon'):[]}; })()"""
 
 async def touch(b):
-    """the thumb cluster on a touch phone (no controller): Jump right above Strike where Use was, Roll out where Lock was,
-    Jump and Roll a size up but under Strike, nothing touching; each button fires its own action; the pause menu lists the
-    touch controls on touch and the keyboard legend again once a keyboard is used"""
+    """the thumb cluster on a touch phone (no controller): Strike in the corner, Jump right above it and Roll above Jump in one
+    column under the right thumb, in portrait and landscape (a playtester on a big phone found Roll too far left in landscape);
+    Jump and Roll a size up but under Strike; in landscape Use / Sprint / Lock in a column beside them; nothing touching, nothing
+    over the objective (at its tallest) or the map/pause buttons, nothing in the safe areas; each button fires its own action;
+    the pause menu lists the touch controls on touch and the keyboard legend again once a keyboard is used"""
     only=os.environ.get('TOUCH_ONLY','')
-    for tag,view in [('landscape',{'width':844,'height':390}),('small',{'width':667,'height':375}),('portrait',{'width':390,'height':844})]:
+    # landscape phones with their safe areas (top,right,bottom,left): 6.9", 6.7", 6.1" notched, then the smallest (no notch);
+    # a landscape tablet; portrait
+    for tag,view,ins in [('landscape',{'width':844,'height':390},(0,47,21,47)),('land956',{'width':956,'height':440},(0,62,21,62)),
+                         ('land932',{'width':932,'height':430},(0,59,21,59)),('small',{'width':667,'height':375},None),
+                         ('tablet',{'width':1180,'height':820},(24,0,20,0)),('portrait',{'width':390,'height':844},(47,0,34,0))]:
         if only and tag not in only: continue
-        ctx,pg,errs=await boot(b,'none',view,True)
+        ctx,pg,errs=await boot(b,'none',view,True,insets=ins)
         await play(pg)
         await pg.evaluate("T.spot(); G.ui.clearCaptions()")
         r=await pg.evaluate(TOUCH_JS)
         o=r['off']; near=lambda v,w,tol=4: abs(v-w)<=tol
         land=tag!='portrait'
-        pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)            # Jump where Use was: right above Strike
-             and near(o['interact']['dx'],-96) and near(o['interact']['dy'],0)  # Use where Jump was: left of Strike
-             and near(o['lock']['dx'],-68) and near(o['lock']['dy'],-68)        # Lock where Roll was: the diagonal
-             and ((o['roll']['dx']<=-160 and near(o['roll']['dy'],0)) if land    # Roll where Lock was: out past Use (landscape) ...
-                  else (near(o['roll']['dx'],0) and o['roll']['dy']<=-160)))     # ... or on top of the column (portrait)
+        if land:
+            pos=(near(o['jump']['dx'],0) and near(o['roll']['dx'],0)                    # one column: Roll above Jump above Strike
+                 and o['roll']['dy']<o['jump']['dy']-60 and o['jump']['dy']<=-80
+                 and near(o['interact']['dx'],-92) and near(o['interact']['dy'],0)      # Use / Sprint / Lock: the next column, same rows
+                 and near(o['sprint']['dx'],-92) and near(o['sprint']['dy'],-86)
+                 and near(o['lock']['dx'],-92) and near(o['lock']['dy'],-168)
+                 and near(o['shutter']['dx'],-172) and near(o['shutter']['dy'],0))    # Shut at the foot of the column after
+        else:
+            pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)                  # portrait: Jump right above Strike,
+                 and near(o['roll']['dx'],0) and near(o['roll']['dy'],-174)             # Roll above Jump,
+                 and near(o['interact']['dx'],-96) and near(o['interact']['dy'],0)      # Use left of Strike,
+                 and near(o['sprint']['dx'],-68) and near(o['sprint']['dy'],-68)        # Sprint on the diagonal, nearest the thumb,
+                 and near(o['lock']['dx'],-83) and near(o['lock']['dy'],-144)           # Lock above it,
+                 and near(o['shutter']['dx'],-76) and near(o['shutter']['dy'],-228))    # Shut (used least) at the top
         check(f'touch:layout:{tag}',pos and r['device']=='touch',{k:r[k] for k in ('off','device')})
         sizes=(r['strike']>=80 and o['jump']['w']>60 and o['roll']['w']>60 and r['strike']-o['jump']['w']>=12 and r['strike']-o['roll']['w']>=12
-               and o['interact']['w']==60 and o['lock']['w']==60)
+               and o['interact']['w']==60 and o['lock']['w']==60 and o['sprint']['w']==60)
         check(f'touch:sizes:{tag}',sizes,{'strike':r['strike'],**{a:o[a]['w'] for a in o}})
-        check(f'touch:clear:{tag}',not r['close'] and not r['offscreen'] and not r['inStick'] and not r['overTop'],{k:r[k] for k in ('close','offscreen','inStick','overTop')})
+        clear=all(not v['close'] and not v['offscreen'] and not v['inStick'] and not v['overTop'] for v in r['sets'].values()) and r['sets']['all']['n']>=11
+        check(f'touch:clear:{tag}',clear and r['rollTop']>=r['questBottom']+8,{'sets':r['sets'],'safe':r['safe'],'questBottom':r['questBottom'],'rollTop':r['rollTop']})
         check(f'touch:fires:{tag}',all(v=='ok' for v in r['fires'].values()),r['fires'])
         await pg.evaluate("G.headless.draw(3)"); await pg.wait_for_timeout(300); await shot(pg,f'touch-cluster-{tag}')
         # the pause menu: the touch legend, with the button names and the held moves, and no keyboard rows
