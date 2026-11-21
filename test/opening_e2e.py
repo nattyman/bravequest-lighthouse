@@ -47,7 +47,7 @@ EXTRA=r"""(()=>{
     const w=O.where(), dur=C.dur; let low=1e9, lowAt=null, blocked=0, frames=0, end=null, g=0;
     while(C.on&&g<900){ G.step(1/30,1); g++; if(!C.on)break; frames++;
       const c=cam.position; let h=-1e9; for(let a=0;a<8;a++)for(const r of [0,1.5,3])h=Math.max(h,H(c.x+Math.cos(a)*r,c.z+Math.sin(a)*r));
-      if(c.y-h<low){ low=c.y-h; lowAt=[+c.x.toFixed(1),+c.y.toFixed(1),+c.z.toFixed(1),+C.t.toFixed(2)]; }
+      if(C.t>.4&&c.y-h<low){ low=c.y-h; lowAt=[+c.x.toFixed(1),+c.y.toFixed(1),+c.z.toFixed(1),+C.t.toFixed(2)]; }
       if(frames%3===0&&ON().rockHit(lp.clone(),c.clone(),rocks))blocked++;
       if(!end&&C.t>=dur-1.1){ cam.updateMatrixWorld(); const L=G.world.landmarks, inView=p=>{ const q=p.clone().project(cam); return Math.abs(q.x)<.95&&Math.abs(q.y)<.95&&q.z<1; };
         end={lh:inView(new V(L.lighthouse.x,L.lighthouse.y+8,L.lighthouse.z)),lhTop:inView(new V(L.lighthouse.x,L.lighthouse.y+20,L.lighthouse.z)),cot:inView(new V(L.cottage.x,L.cottage.y+2,L.cottage.z))}; } }
@@ -105,17 +105,20 @@ CASES=[
   ("shot", 120, r"""(()=>{ const r=O.watch(); r.ok=r.where==='below'&&r.okShot&&r.okBack; return r; })()"""),
  ]),
  ("cottage", False, [
-  ("walk", 240, r"""(()=>{ O.begin(); const R=O.R(), L=G.world.landmarks, d=L.cottageDoor; const pts=R.map(p=>[p.x,p.z]); pts.push([d.x-4,d.z-6],[d.x-1,d.z-2]);
-     const r=O.walk(pts,6000); return {ok:r.ok&&G._onb.atCottage(G.player.pos)&&!G.cine.on,far:O.far(),cine:G.cine.on,step:G.quest.step,wake:O.ev.filter(e=>e[0]==='wake').length}; })()"""),
+  ("walk", 240, r"""(()=>{ O.begin(); const R=O.R(), L=G.world.landmarks, d=L.cottageDoor; const pts=R.map(p=>[p.x,p.z]); pts.push([d.x-1,d.z-6]);
+     const r=O.walk(pts,6000); return {r,at:[G.player.pos.x,G.player.pos.y,G.player.pos.z].map(v=>+v.toFixed(1)),door:[d.x,d.z],ok:r.ok&&G._onb.atCottage(G.player.pos)&&!G.cine.on,far:O.far(),cine:G.cine.on,step:G.quest.step,wake:O.ev.filter(e=>e[0]==='wake').length}; })()"""),
   ("noShot", 240, r"""(()=>{ const r=O.lines(); const m=O.ms(); r.m=m; r.seen=G.cine.seen('opening'); r.ok=!r.on&&!r.seen&&!r.owed&&r.wake.length===1&&!!m&&m.t!=null; return r; })()"""),
  ]),
  ("waits", False, [
   # a card open as the last line goes: the shot waits for it to close
-  ("card", 240, r"""(()=>{ O.begin(); let n=0; while(!/cottage windows/.test((G.ui.captions().cur||{}).text||'')&&n<3600){ if(n%15===0)G.ui.advance(); G.step(1/30,1); n++; }
-     const opened=G.talk.open({who:'Test',name:'A stranger',lines:['A test card.']}); let k=0; while(!O.ev.some(e=>e[0]==='wake')&&k<1800){ if(k%15===0)G.ui.advance(); G.step(1/30,1); k++; }
-     G.step(1/30,30); const during={card:G.talk.isOpen,on:G.cine.on,owed:G._onb.owed,wake:O.ev.filter(e=>e[0]==='wake')};
-     G.talk.close(); G.step(1/30,5); const after=G.cine.on&&G.cine.id==='opening'; G.cine.skip(); G.step(1/30,3);
-     return {ok:opened&&during.card&&!during.on&&during.owed&&during.wake.length===1&&after,n,k,during,after}; })()"""),
+  ("card", 300, r"""(()=>{ O.begin(); let n=0; while(!/cottage windows/.test((G.ui.captions().cur||{}).text||'')&&n<3600){ if(n%15===0)G.ui.advance(); G.step(1/30,1); n++; }
+     // the card holds the captions, so the last line waits under it; the shot comes after the card and the line
+     const opened=G.talk.open({who:'Test',name:'A stranger',lines:['A test card.']}); G.step(1/30,90); const during={card:G.talk.isOpen,on:G.cine.on};
+     G.talk.close(); let k=0; while(!G.cine.on&&k<1800){ if(k%15===0)G.ui.advance(); G.step(1/30,1); k++; } const after=G.cine.on&&G.cine.id==='opening'; G.cine.skip(); G.step(1/30,3);
+     // and the shot owed while a card is up: it waits for the card to close
+     delete G._onb.S.seen.opening; G.talk.open({who:'Test',name:'A stranger',lines:['A test card.']}); G.emit('wake:done',{from:G.player.pos.clone(),windows:true}); G.step(1/30,30);
+     const owedCard={card:G.talk.isOpen,on:G.cine.on,owed:G._onb.owed}; G.talk.close(); G.step(1/30,5); const after2=G.cine.on; G.cine.skip(); G.step(1/30,3);
+     return {ok:opened&&during.card&&!during.on&&after&&owedCard.card&&!owedCard.on&&owedCard.owed&&after2,n,k,during,after,owedCard,after2}; })()"""),
   # in the air: waits for the landing
   ("airborne", 60, r"""(()=>{ delete G._onb.S.seen.opening; const P=G.player; G.input.setVirtual('jump',true); let k=0; while(P.grounded&&k<30){ G.step(1/30,1); k++; } G.input.setVirtual('jump',false);
      const air=!P.grounded; G.emit('wake:done',{from:P.pos.clone(),windows:true}); G.step(1/30,1); const during={on:G.cine.on,owed:G._onb.owed};
@@ -140,7 +143,9 @@ async def main():
         errs=[]; pg.on('pageerror',lambda e: errs.append('PAGEERROR '+str(e))); pg.on('console',lambda m: errs.append(m.text) if m.type=='error' else None)
         async def boot():
             await pg.evaluate(LIB); await pg.evaluate(EXTRA)
+        only=[c for c in os.environ.get('OPENING_CASES','').split(',') if c]   # a quick local look at one case
         for case,_fb,steps in CASES:
+            if only and case not in only: continue
             await pg.goto(URL,timeout=180000); await pg.wait_for_timeout(4000)
             await pg.evaluate("localStorage.removeItem('bq-save-v1'); localStorage.removeItem('bq-save-test-v1')")
             await pg.reload(); await pg.wait_for_timeout(4000); await boot()

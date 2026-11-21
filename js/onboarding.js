@@ -282,7 +282,7 @@ function openingShot(){
   }
   // the time it takes grows with the flight (the full climb from the sand ~14 s; the reveal alone from the headland ~7 s)
   let len=0; { const A=all(); for(let i=1;i<A.length;i++)len+=A[i].distanceTo(A[i-1]); }
-  const dur=U.clamp(4+len/26,7,16);
+  const dur=U.clamp(5+len/18,7,16);
   return path('opening',{dur,path:cams,look,fromCamera:true,fov,hold:.14,fadeOut:.6,
     safe:true,hud:false,music:'wistful',handBack:{yaw,pitch:.22}});
 }
