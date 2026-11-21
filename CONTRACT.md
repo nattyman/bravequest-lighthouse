@@ -88,6 +88,9 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   `G.audio.music.setOverride` state for the shot, e.g. `'wistful'`, restored after), `handBack:{yaw,pitch}` (or a fn) for the follow camera,
   `fadeOut` (s, dip to black at the end). Read-outs: `G.cine.on/id/safe/clean/t/dur/seen(id)`, `G.cine.skip()`. Event `cine` {on,id}.
   Game time only (deterministic under `G.step`, runs under `?headless`). Tests skip shots with `G.cine.skip()`.
+  The opening shot (`'opening'`, after `wake:done` with `windows`) is owed until it plays: it waits for a calm moment (no card, boss,
+  map, fall, roll, hurt or death) and plays wherever Rowan is (from the sand, partway up the cliff path, or on the headland: the reveal
+  alone), handing back facing on along the route. It is let go once he is at the cottage or the step has moved past `cottage`.
 - Pickups (flow.js implements): `G.pickups.spawn('heart'|'mushroom', pos)`.
 - Companions (js/companions.js, COMPANIONS.md): `G.companions = {ember, corvin, has(id), send(id), call(id), spots, shardSpots, names, raven, debug}`;
   `send('ember')` = R (at a fox spot: go; else heel), `send('corvin')` = T (at a raven spot: go; else scout, 45 s cooldown). Hooks it uses:
@@ -172,7 +175,7 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `stag:engage` | — | monsters (the Hollow Stag leaves its guard over Hesper's lantern) |
 | `finale:start` | — | flow (when you step outside after lamp:cured); finale_boss.js answers it — the Stag no longer does |
 | `boss:dead` | {who:'stag'\|'gloaming'} | monsters (stag) / finale_boss (gloaming). Only `who:'gloaming'` ends Act 1 |
-| `wake:done` | {from, windows} | flow (the new game's opening lines on the beach have finished; onboarding.js plays the opening shot) |
+| `wake:done` | {from, windows, early} | flow (the new game's opening lines have finished, wherever he is; `early` when the rest were dropped because the game moved on or something else was said; `windows` = the beach start before the cloak. onboarding.js owes the opening shot; record.js marks 'ashore') |
 | `map:waypoint` | {id, quiet} | map (a waystone unlocked; quiet = granted from an old save / home) |
 | `map:travel` | {id, phase:'start'\|'arrive'\|'done'} | map (fast travel: fade out → moved → faded back in) |
 | `companion:earned` | {id:'ember'\|'corvin', quiet} | companions (quiet = granted from an old save / a load) |

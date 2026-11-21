@@ -8,8 +8,10 @@
      rolls back, so you see what feeding the light does.
    - two nudges: the lantern shutter (what closing it does), and the staff techniques (once you've swung a lot
      and found none).
-   - the opening: after Rowan's first thought on the beach (the warm cottage windows), the camera rises off the sand and
+   - the opening: after Rowan's first thought on the beach (the warm cottage windows), the camera rises off him and
      follows the walkable route up the cliff path and over the edge to the lighthouse and the cottage (flow.js 'wake:done').
+     It plays wherever he has got to by then (the sand, partway up, the headland), waiting for a calm moment, until he
+     reaches the cottage.
    API: G.cine = {play(id,o), path(id,o), on, id, safe, seen(id), skip()}  (CONTRACT.md: Cut scenes)
    ===================================================================== */
 (function(){
@@ -176,10 +178,14 @@ function etherShot(){
   }});
 }
 
-// the opening: Rowan's first thought on the beach has ended (flow.js 'wake:done'). The camera leaves him, rises off the
-// sand and follows the real route (the trail data in G.world.landmarks.path: the cliff path's switchbacks) up and over
-// the edge, and comes to rest on the goal: the dark lighthouse and the cottage with its warm windows. Then a dip to
-// black and the follow camera is back behind him, facing the foot of the cliff path.
+// the opening: Rowan's first thought on the beach has ended (flow.js 'wake:done'). The camera leaves him, rises and follows
+// the real route (the trail data in G.world.landmarks.path: the cliff path's switchbacks) up and over the edge, and comes
+// to rest on the goal: the dark lighthouse and the cottage with its warm windows. Then a dip to black and the follow camera
+// is back behind him, facing on along the route. It plays wherever he is by then (a playtester ran straight off the sand
+// and never saw it): on the sand or the turf it leaves from him and joins the climb at its foot; partway up the path it
+// picks the climb up where he stands; up on the headland it is only the reveal. Once he is at the cottage (or has the
+// cloak) there is nothing left to show, and it is let go. Not at a bad moment: it waits out a card, a boss, a fall,
+// a death or the pause, and starts as soon as it can.
 function routeUp(){ // the walkable climb, bottom to top, from the trail polyline between the cliff path's two ends
   const L=G.world.landmarks, pts=L.path||[], b=L.cliffPathBottom, t=L.cliffPathTop;
   const near=(p,q)=>q&&Math.hypot(p.x-q.x,p.z-q.z)<.5, ib=pts.findIndex(p=>near(p,b)), it=pts.findIndex(p=>near(p,t));
@@ -187,39 +193,112 @@ function routeUp(){ // the walkable climb, bottom to top, from the trail polylin
   const seg=pts.slice(Math.min(ib,it),Math.max(ib,it)+1); if(ib>it)seg.reverse();
   return seg.map(p=>V(p.x,G.floorAt(p.x,p.z,60),p.z));
 }
-function openingShot(from){
+// a point against the climb: s = metres up the route from its foot, d = how far off it (the two legs run side by side
+// below the switchback, a few metres apart in plan and well apart in height, so height counts toward d)
+function alongRoute(R,p){
+  let best={d:1e9,s:0,i:0}, acc=0;
+  for(let i=0;i<R.length-1;i++){ const a=R[i], b=R[i+1], dx=b.x-a.x, dz=b.z-a.z, l=Math.hypot(dx,dz)||1;
+    const u=U.clamp(((p.x-a.x)*dx+(p.z-a.z)*dz)/(l*l),0,1), d=Math.hypot(p.x-a.x-dx*u,p.z-a.z-dz*u)+Math.abs(p.y-(a.y+(b.y-a.y)*u))*.7;
+    if(d<best.d)best={d,s:acc+u*l,i}; acc+=l; }
+  best.len=acc; return best;
+}
+function routeAt(R,s){ // the point s metres up the route
+  for(let i=0;i<R.length-1;i++){ const l=Math.hypot(R[i+1].x-R[i].x,R[i+1].z-R[i].z); if(s<=l||i===R.length-2)return R[i].clone().lerp(R[i+1],U.clamp(s/(l||1),0,1)); s-=l; }
+  return R[R.length-1].clone();
+}
+// where he is, as the shot sees it: 'top' (on the headland), 'path' (on the climb, s metres up), or 'below' (the sand,
+// the turf, anywhere else under the edge)
+function openingWhere(R,p){
+  const W=G.world; if(p.y>W.plateauY-3&&W.onPlateau&&W.onPlateau(p.x,p.z))return {at:'top'};
+  const r=alongRoute(R,p); return r.d<9&&r.s>2?{at:'path',s:r.s,len:r.len}:{at:'below',len:r.len};
+}
+// near enough to the cottage (or in it) that the reveal has nothing left to tell him
+function atCottage(p){
+  const L=G.world.landmarks, d=L.cottageDoor||L.cottage, C=G.world.cottage;
+  return !!((C&&C.inside&&C.inside(p))||(d&&Math.hypot(p.x-d.x,p.z-d.z)<14&&p.y>G.world.plateauY-3));
+}
+// what can stand in the camera's way: the rock skin and the sculpted pieces over the cliffs (cliffs.js, cliffkit.js),
+// which stand proud of the ground the height field describes
+const _rc=new THREE.Raycaster();
+function rocks(){ const a=[]; try{ for(const m of (G.cliffs&&G.cliffs.meshes)||[])if(m&&m.visible!==false)a.push(m);
+  for(const m of (G.cliffkit&&G.cliffkit.group&&G.cliffkit.group.children)||[])a.push(m); }catch(e){} return a; }
+function rockHit(from,to,objs){ const d=to.clone().sub(from), l=d.length(); if(l<.01||!objs.length)return false;
+  _rc.set(from,d.multiplyScalar(1/l)); _rc.near=0; _rc.far=l; return _rc.intersectObjects(objs,false).length>0; }
+function openingShot(){
   const L=G.world.landmarks, P=G.player, R=routeUp(); if(!R||!P||!P.pos||!L.cottage||!L.lighthouse)return false;
-  const H=(x,z)=>G.world.height(x,z), at=(p,dy)=>V(p.x,H(p.x,p.z)+dy,p.z);
-  const me=P.pos.clone(), foot=R[0], top=R[R.length-1];
+  const H=(x,z)=>Math.max(G.world.height(x,z),G.floorAt(x,z,1e9)), at=(p,dy)=>V(p.x,H(p.x,p.z)+dy,p.z), flat=v=>{ v.y=0; return v.lengthSq()>1e-6?v.normalize():V(1,0,0); };
+  const me=P.pos.clone(), foot=R[0], top=R[R.length-1], w=openingWhere(R,me);
   // the climb's landmarks along the route: the first leg, the switchback at its north end, the second leg, the top
   let sw=0; for(let i=1;i<R.length;i++)if(R[i].z<R[sw].z)sw=i;
   const leg1=R[1].clone().lerp(R[sw],.5), leg2=R[sw].clone().lerp(R[Math.min(R.length-1,sw+3)],.55);
-  const away=V(me.x-foot.x,0,me.z-foot.z).normalize();          // from the cliff-path foot back out to sea
-  const lh=V(L.lighthouse.x,L.lighthouse.y,L.lighthouse.z), cot=V(L.cottage.x,L.cottage.y,L.cottage.z);
+  const lh=V(L.lighthouse.x,L.lighthouse.y,L.lighthouse.z), cot=V(L.cottage.x,L.cottage.y,L.cottage.z), door=L.cottageDoor||L.cottage;
   const goal=lh.clone().lerp(cot,.42).setY(lh.y+10);                // between the tower and the cottage, a little up
-  const cams=[
-    me.clone().addScaledVector(away,9).setY(me.y+10),             // a crane up off the sand, behind him: he stays in frame
-    at(me.clone().lerp(foot,.4),14).addScaledVector(away,6),      // over the turf above the beach, heading for the cliff path
-    at(foot,20).add(V(-14,0,12)),                                 // west of the path's foot, looking up the first leg
-    at(leg1,30).add(V(-16,0,-4)),                                 // alongside the first leg, rising with it
-    at(R[sw],26).add(V(-12,0,8)),                                 // level with the switchback, looking back up the second leg
-    at(leg2,22).add(V(-8,0,10)),                                  // over the second leg, near the edge
-    at(top,15).add(V(-17,0,5))                                    // over the edge: the goal ahead
+  const sOf=p=>alongRoute(R,p).s;
+  // the climb, as beats out in the air west of it (the open side, over the lowland): [camera, look, fov, metres up the route]
+  const beats=[
+    [at(foot,20).add(V(-14,0,12)), at(leg1,5), 56, 0],                    // west of the path's foot, looking up the first leg
+    [at(leg1,30).add(V(-16,0,-4)), at(R[sw],1), 56, sOf(leg1)],           // alongside the first leg, rising with it
+    [at(R[sw],26).add(V(-12,0,8)), at(leg2,1), 56, sOf(R[sw])],           // level with the switchback, looking back up the second leg
+    [at(leg2,22).add(V(-8,0,10)), at(top,1.5), 54, sOf(leg2)]             // over the second leg, near the edge
   ];
-  const look=[me.clone().addScaledVector(away,-5).setY(me.y+1), at(foot,8), at(leg1,5), at(R[sw],1), at(leg2,1), at(top,1.5), goal];
-  // never inside the ground: every camera point keeps 6 m over the highest terrain within 6 m of it
-  for(const c of cams){ let h=-1e9; for(let a=0;a<8;a++)for(const r of [0,3,6])h=Math.max(h,H(c.x+Math.cos(a)*r,c.z+Math.sin(a)*r)); c.y=Math.max(c.y,h+6); }
-  const yaw=Math.atan2(foot.x-me.x,foot.z-me.z);
-  return path('opening',{dur:14,path:cams,look,fromCamera:true,fov:[52,54,56,56,56,54,50],hold:.14,fadeOut:.6,
+  const cams=[], look=[], fov=[]; const add=(c,l,f)=>{ cams.push(c); look.push(l); fov.push(f); };
+  // which way is "on" from where he stands, and which way is behind him
+  let on, yaw;
+  if(w.at==='below'){ on=flat(foot.clone().sub(me)); if(Math.hypot(foot.x-me.x,foot.z-me.z)<4)on=flat(R[1].clone().sub(me)); }
+  else if(w.at==='path')on=flat(routeAt(R,w.s+6).sub(routeAt(R,Math.max(0,w.s-2))));
+  else on=flat(V(door.x,0,door.z).sub(me));
+  yaw=Math.atan2(on.x,on.z);
+  // 1. a crane up off him, from behind: he stays in frame. On the climb, it also leans out over the open side (the
+  //    lower ground beside the path), away from the face he is climbing
+  const crane=me.clone().addScaledVector(on,-9).setY(me.y+10);
+  if(w.at==='path'){ const sx=V(on.z,0,-on.x), lo=H(me.x+sx.x*10,me.z+sx.z*10)<H(me.x-sx.x*10,me.z-sx.z*10)?1:-1; crane.addScaledVector(sx,6*lo); }
+  add(crane,me.clone().addScaledVector(on,5).setY(me.y+1),52);
+  if(w.at==='below'){
+    // 2. over the ground between him and the path's foot, heading for it (one point every ~40 m when he has wandered far)
+    const d=Math.hypot(foot.x-me.x,foot.z-me.z), m=Math.max(1,Math.round(d/40));
+    for(let j=1;j<=m;j++){ const q=me.clone().lerp(foot,j/(m+1)*(m===1?.8:1)), aw=flat(q.clone().sub(foot)); add(at(q,14).addScaledVector(aw,6),at(foot,8),54); }
+  }
+  // 3. the climb from wherever he is on it: the beats still ahead of him
+  if(w.at!=='top')for(const b of beats)if(w.at==='below'||b[3]>w.s+8)add(b[0].clone(),b[1].clone(),b[2]);
+  // 4. over the edge: the goal ahead
+  add(at(top,15).add(V(-17,0,5)),goal,50);
+  // never inside the ground or the rock: every camera point keeps 6 m over the highest ground within 9 m of it, sits
+  // above any rock over it, and sees its look point past the rock (raised until it does)
+  const objs=rocks(), up=V(0,80,0), clearOf=(c,r,m)=>{ let h=-1e9; for(let a=0;a<8;a++)for(const q of r)h=Math.max(h,H(c.x+Math.cos(a)*q,c.z+Math.sin(a)*q)); return Math.max(c.y,h+m); };
+  const sees=(c,l)=>{ for(let k=1;k<12;k++){ const t=k/12, x=l.x+(c.x-l.x)*t, z=l.z+(c.z-l.z)*t; if(l.y+(c.y-l.y)*t<H(x,z)+.5)return false; } return !rockHit(l,c,objs); };
+  for(let i=0;i<cams.length;i++){ const c=cams[i];
+    c.y=clearOf(c,[0,3,6,9],6);
+    if(rockHit(c.clone().add(up),c.clone().add(V(0,-4,0)),objs)){ _rc.set(c.clone().add(up),V(0,-1,0)); _rc.far=84; const h=_rc.intersectObjects(objs,false)[0]; if(h)c.y=Math.max(c.y,h.point.y+5); }
+    for(let k=0;k<8&&!sees(c,look[i]);k++)c.y+=4;
+  }
+  // and between the points: walk the curve the shot will fly (it starts at the follow camera) and lift whichever point
+  // a low or blocked stretch belongs to, until the whole flight is clear
+  const cam=G.camera, all=()=>[cam.position.clone()].concat(cams), lAll=()=>[V(me.x,me.y+1.35,me.z)].concat(look);
+  for(let pass=0;pass<5;pass++){
+    const pc=new THREE.CatmullRomCurve3(all(),false,'centripetal'), lc=new THREE.CatmullRomCurve3(lAll(),false,'centripetal'), n=cams.length; let bad=-1, need=0;
+    for(let k=4;k<=40&&bad<0;k++){ const t=k/40, c=pc.getPoint(t), l=lc.getPoint(t), g=clearOf(c,[0,2.5,5],3.5)-c.y;
+      if(g>.01||(k%2===0&&!sees(c,l))){ bad=Math.max(0,Math.min(n-1,Math.round(t*n)-1)); need=Math.max(g,2.5); } }
+    if(bad<0)break; cams[bad].y+=need+1;
+  }
+  // the time it takes grows with the flight (the full climb from the sand ~14 s; the reveal alone from the headland ~7 s)
+  let len=0; { const A=all(); for(let i=1;i<A.length;i++)len+=A[i].distanceTo(A[i-1]); }
+  const dur=U.clamp(5+len/18,7,16);
+  return path('opening',{dur,path:cams,look,fromCamera:true,fov,hold:.14,fadeOut:.6,
     safe:true,hud:false,music:'wistful',handBack:{yaw,pitch:.22}});
 }
-G.on('wake:done',e=>{
-  if(!e||!e.windows||S.seen.opening)return;
-  const P=G.player, f=e.from; if(!P||!P.alive||G.state.mode!=='play'||G.quest.step!=='cottage')return;
-  if(f&&Math.hypot(P.pos.x-f.x,P.pos.z-f.z)>45)return;          // already up off the beach: the climb needs no showing
-  if((G.talk&&G.talk.isOpen)||(G.monsters&&G.monsters.boss))return;
-  openingShot(f);
-});
+// owed from 'wake:done' (the beach start's last line has gone) until it plays or there is nothing left to show
+let owed=false;
+const openingCan=()=>{ const P=G.player;
+  return G.state.mode==='play'&&!C.on&&P&&P.alive&&P.grounded&&P.state!=='hurt'&&P.state!=='roll'&&!P.gliding
+    &&!(G.talk&&G.talk.isOpen)&&!(G.monsters&&G.monsters.boss)&&!(G.finaleBoss&&G.finaleBoss.active)&&!(G.map&&G.map.isOpen)&&!(G.cineBusy&&G.cineBusy()); };
+function openingTick(){
+  if(!owed)return;
+  if(S.seen.opening||G.quest.step!=='cottage'||!G.player||!G.player.pos||atCottage(G.player.pos)){ owed=false; return; }
+  if(!openingCan())return;
+  owed=false; openingShot();   // (a world without the route or the goal has no shot to give: let it go)
+}
+G.on('wake:done',e=>{ if(!e||!e.windows||S.seen.opening)return; owed=true; openingTick(); });
+G.system('openingWatch',{order:83,update:openingTick});
 
 G.on('lamp:fed',()=>{ // fog.js marks itself fed just after this event: before that, this is the first feed
   try{ const fed=G.fog&&G.fog._persist&&G.fog._persist.save().fed; if(fed||!G.lamp||!G.lamp.active)return; }catch(e){ return; }
@@ -254,5 +333,5 @@ G.persist&&G.persist.register('onboarding',{
 // a save from before this module: an already-fed lamp or a cured lighthouse means those moments have passed
 G.on('loop:start',e=>{ try{ if(G.fog&&G.fog._persist&&G.fog._persist.save().fed)S.seen.ether=1; }catch(_){} });
 
-if(G.debug)G._onb={S,C,cureShot,etherShot,riseSpot,openingShot,routeUp};
+if(G.debug)G._onb={S,C,cureShot,etherShot,riseSpot,openingShot,routeUp,alongRoute,routeAt,openingWhere,atCottage,rocks,rockHit,get owed(){ return owed; }};
 })();
