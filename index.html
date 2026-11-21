@@ -150,13 +150,14 @@ kbd{font-family:var(--body);font-weight:700;font-size:11.5px;min-width:21px;heig
 .touch button.on,.touch button:active{background:rgba(165,108,255,.42);transform:scale(.94)}
 /* Jump and Roll are a size up from the small buttons (still well under Strike) */
 .touch [data-act=jump],.touch [data-act=roll]{--s:68px}
-/* portrait: arc upward (Jump above Strike, Roll above Jump) */
+/* portrait: arc upward (Jump above Strike, Roll above Jump). To their left, nearest the thumb first by how often each is
+   used: Sprint on the diagonal beside Jump, Lock above it, and Shut (used least) at the top, up and left of Roll */
 .touch [data-act=jump]{--x:0px;--y:-96px}
-.touch [data-act=lock]{--x:-68px;--y:-68px}
+.touch [data-act=sprint]{--x:-68px;--y:-68px}
 .touch [data-act=interact]{--x:-96px;--y:0px}
 .touch [data-act=roll]{--x:0px;--y:-174px}
-.touch [data-act=shutter]{--x:-83px;--y:-144px}
-.touch [data-act=sprint]{--x:-76px;--y:-228px}   /* the free slot above Shut, up and left of Roll, clear of it */
+.touch [data-act=lock]{--x:-83px;--y:-144px}
+.touch [data-act=shutter]{--x:-76px;--y:-228px}
 /* landscape: the same Strike / Jump / Roll column under the right thumb (a touch tighter: a phone on its side is short,
    and Roll must stay under the objective on a 375px-high screen). Beside it a column of Use / Sprint / Lock on the same rows:
    Sprint in the middle, next to Jump and away from Strike and Roll so a thumb going for those doesn't latch it; Lock beside

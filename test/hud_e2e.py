@@ -242,7 +242,7 @@ async def touch(b):
     the pause menu lists the touch controls on touch and the keyboard legend again once a keyboard is used"""
     only=os.environ.get('TOUCH_ONLY','')
     # landscape phones with their safe areas (top,right,bottom,left): 6.9", 6.7", 6.1" notched, then the smallest (no notch);
-    # a landscape tablet; portrait (unchanged)
+    # a landscape tablet; portrait
     for tag,view,ins in [('landscape',{'width':844,'height':390},(0,47,21,47)),('land956',{'width':956,'height':440},(0,62,21,62)),
                          ('land932',{'width':932,'height':430},(0,59,21,59)),('small',{'width':667,'height':375},None),
                          ('tablet',{'width':1180,'height':820},(24,0,20,0)),('portrait',{'width':390,'height':844},(47,0,34,0))]:
@@ -261,12 +261,12 @@ async def touch(b):
                  and near(o['lock']['dx'],-92) and near(o['lock']['dy'],-168)
                  and near(o['shutter']['dx'],-172) and near(o['shutter']['dy'],0))    # Shut at the foot of the column after
         else:
-            pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)                  # portrait as it was: Jump right above Strike,
+            pos=(near(o['jump']['dx'],0) and near(o['jump']['dy'],-96)                  # portrait: Jump right above Strike,
                  and near(o['roll']['dx'],0) and near(o['roll']['dy'],-174)             # Roll above Jump,
                  and near(o['interact']['dx'],-96) and near(o['interact']['dy'],0)      # Use left of Strike,
-                 and near(o['lock']['dx'],-68) and near(o['lock']['dy'],-68)            # Lock on the diagonal,
-                 and near(o['shutter']['dx'],-83) and near(o['shutter']['dy'],-144)    # Shut above it,
-                 and near(o['sprint']['dx'],-76) and near(o['sprint']['dy'],-228))      # Sprint (new) in the free slot above Shut
+                 and near(o['sprint']['dx'],-68) and near(o['sprint']['dy'],-68)        # Sprint on the diagonal, nearest the thumb,
+                 and near(o['lock']['dx'],-83) and near(o['lock']['dy'],-144)           # Lock above it,
+                 and near(o['shutter']['dx'],-76) and near(o['shutter']['dy'],-228))    # Shut (used least) at the top
         check(f'touch:layout:{tag}',pos and r['device']=='touch',{k:r[k] for k in ('off','device')})
         sizes=(r['strike']>=80 and o['jump']['w']>60 and o['roll']['w']>60 and r['strike']-o['jump']['w']>=12 and r['strike']-o['roll']['w']>=12
                and o['interact']['w']==60 and o['lock']['w']==60 and o['sprint']['w']==60)
