@@ -47,15 +47,24 @@ S_SLACK=r"""(()=>{ RT.prep(); const tl=+G.tide.level.toFixed(2); const lab=RT.lo
   return {ok:lab==='Set the lantern on the raft'&&r.state==='arrived'&&r.pushes===0&&r.runT>=25&&r.runT<=35&&r.r0,tide:tl,lab,...r,waves:RT.ev.filter(e=>e.n==='cave:raid').length}; })()"""
 S_PEAK=r"""(()=>{ RT.prep({tide:225}); G.step(1/30,2); const tl=+G.tide.level.toFixed(2); RT.load(); const r=RT.runNoHelp();
   return {ok:r.state==='arrived'&&r.pushes===0&&r.runT>=25&&r.runT<=35&&Math.abs(tl)<.3,tide:tl,...r}; })()"""
-S_PUSHED=r"""(()=>{ RT.prep(); RT.load(); const R=RT.R(); const r0=RT.toWalkway(); let n=r0.steps, shots=0, onRaft=0;
+S_PUSHED=r"""(()=>{
+  // No boarding waves here: this is the push alone. (A wave's crab gripping the edge mid-charge makes the raft untargetable, the lock
+  // drops and that bolt flies wide: how many of the run's 15 or so bolts that happened to varied with how the waves fell against the
+  // shots, 8 to 10 pushes, a run of 21-23 s against a 23 s bar. Raiders and bolts together are the cave suite's raftRun.)
+  RT.prep(); RT.load(); G.cavePuzzles.raid.wave=9; const R=RT.R(); const r0=RT.toWalkway(); let n=r0.steps, shots=0, onRaft=0;
   while(R.state!=='arrived'&&n<2400){
     for(const m of RT.raiders()) if(m.state==='grip')m.hb.hit({damage:9,kind:'melee',dir:new THREE.Vector3(0,0,1)});
     if(R.state==='drifting'&&!RT.raiders().length&&Math.abs(R.pos.x-G.player.pos.x)<6){   // lock on to the raft and loose a charged bolt
-      if(G.player.lockTarget)T.tap('lock',1); T.tap('lock',2); const lt=G.player.lockTarget; if(lt&&lt.raft)onRaft++;
-      G.input.setVirtual('attack',true); G.step(1/30,20); G.input.setVirtual('attack',false); G.step(1/30,8); if(G.player.lockTarget)T.tap('lock',1); shots++; n+=32; }
+      // keeping pace with the raft through the charge, steered afresh every frame. (It used to hold whatever keys follow() last set:
+      // locked on, the camera swings round to the raft, so the same keys walked you somewhere else, and from the back of the boards
+      // the bolt went into the walkway itself)
+      T.release(); if(G.player.lockTarget)T.tap('lock',1); T.tap('lock',2); const lt=G.player.lockTarget; if(lt&&lt.raft)onRaft++;
+      G.input.setVirtual('attack',true); for(let k=0;k<20;k++){ RT.follow(); G.step(1/30,1); } G.input.setVirtual('attack',false); for(let k=0;k<8;k++){ RT.follow(); G.step(1/30,1); }
+      T.release(); if(G.player.lockTarget)T.tap('lock',1); shots++; n+=32; }
     RT.follow(); G.step(1/30,1); n++; T.top(); }
   T.release();
-  return {ok:R.state==='arrived'&&R.pushes>=3&&R.runT<23,runT:+R.runT.toFixed(1),pushes:R.pushes,shots,lockedOnRaft:onRaft}; })()"""
+  // every bolt loosed locked on the raft lands (bar one still in the air as it arrives)
+  return {ok:R.state==='arrived'&&R.pushes>=3&&R.pushes>=onRaft-1&&R.runT<23,runT:+R.runT.toFixed(1),pushes:R.pushes,shots,lockedOnRaft:onRaft}; })()"""
 S_RAIDER=r"""(()=>{ RT.prep(); RT.load(); const R=RT.R(), P=G.player; RT.toWalkway(); RT.reset();
   G.cavePuzzles.raid.wave=9; G.ui.clearCaptions&&G.ui.clearCaptions();                // only our crab
   const m=RT.D().spawnRaider(1); const out={};

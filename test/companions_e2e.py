@@ -53,8 +53,12 @@ FRESH=[
  ("halloran", r"""(()=>{ const h=G.creatures.halloran; T.tp(h.pos.x+1.5,h.pos.z); G.creatures.talk(); G.step(1/30,4); const once=T.said(/taken a shine to you/);
    G.creatures.talk(); G.step(1/30,4); const n=G.ui.messages().filter(m=>/taken a shine/.test(m.text)).length; return {ok:once&&n===1,once,n}; })()"""),
  # Corvin: the raven negative on the standing stones
- ("ravenFlits", r"""(()=>{ const R=G.companions.raven; const s0=R.stone; T.tp(R.pos.x+12,R.pos.z); G.step(1/30,10); const seen=T.said(/raven-shaped hole/);
-   const lureBefore=R.lure(); T.tp(R.pos.x+2,R.pos.z); G.step(1/30,80); return {ok:seen&&!lureBefore&&R.stone!==s0&&R.state==='perch',seen,lureBefore,s0,s1:R.stone}; })()"""),
+ # (it can be in the air when the check begins: it hops between stones on its own while you're more than 14 m off, and R.stone is
+ # already the stone it is flying to. Standing 2 m from a point in mid-flight then put you nowhere near where it landed, and it stayed
+ # put. So let it land first, then stand off at 12 m from its stone: inside 14 m it doesn't hop on its own, outside 5.2 m it isn't spooked)
+ ("ravenFlits", r"""(()=>{ const R=G.companions.raven; T.tp(R.pos.x+12,R.pos.z); let w=0; while(R.state!=='perch'&&w<300){ G.step(1/30,1); w++; }
+   const s0=R.stone; T.tp(R.pos.x+12,R.pos.z); G.step(1/30,10); const seen=T.said(/raven-shaped hole/), still=R.state==='perch'&&R.stone===s0;
+   const lureBefore=R.lure(); T.tp(R.pos.x+2,R.pos.z); G.step(1/30,80); return {ok:still&&seen&&!lureBefore&&R.stone!==s0&&R.state==='perch',landedAfter:+(w/30).toFixed(1),still,seen,lureBefore,s0,s1:R.stone}; })()"""),
  ("ravenWeak", r"""(()=>{ const R=G.companions.raven; const t=R.hb.targetable, al=R.hb.alive(); R.hb.hit({damage:1,dir:new THREE.Vector3(1,0,0)}); R.hb.hit({damage:1,dir:new THREE.Vector3(1,0,0)});
    const prey=G.creatures.negatives.includes(R); return {ok:t&&al&&R.weak>0&&R.lure()&&prey&&T.said(/too tired to lift/),weak:R.weak,lure:R.lure()}; })()"""),
  ("earnCorvin", r"""(()=>{ const R=G.companions.raven; R.bite=3; G.step(1/30,90); const r={dead:R.dead,has:G.companions.has('corvin'),said:T.said(/lands on your shoulder/),freed:G.creatures.freed,toast:document.getElementById('toast').textContent};

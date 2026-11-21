@@ -80,7 +80,10 @@ const marker=()=>{ const q=G.quest.target; return q?(G.cave.inside?(q.y>G.cave.o
    target to turn, and with a raider on the raft below that walked Rowan off the walkway into the channel: drowned, pushed out,
    hurt, again, until he died mid-run with the swarm on the raft) */
 function face(x,z){ const p=P().pos, a=Math.atan2(x-p.x,z-p.z); P().heading=a; P().aimCamera(a); G.step(1/30,1); }
-function bolt(m){ let ok=false;
+/* (it lets go of the stick first: a charged bolt is loosed standing still. It used to keep whatever keys the last steer() held, and
+   once locked on the camera swings round to the target, so the same keys walked you off the walkway toward the raft: a splash, back
+   on the edge of the boards, and again, the whole raft run; a run that ended down in the channel left the lantern out of reach) */
+function bolt(m){ let ok=false; release();
   for(let k=0;k<6&&!ok;k++){ if(P().lockTarget)tap('lock',1); tap('lock',2); ok=P().lockTarget===m.hb;
     if(!ok){ if(P().lockTarget)tap('lock',1); face(m.pos.x,m.pos.z); G.step(1/30,2); } }
   G.input.setVirtual('attack',true); G.step(1/30,22); G.input.setVirtual('attack',false); G.step(1/30,12);
@@ -245,7 +248,7 @@ STEPS=[
    const r=T.walk([[4.6,-80.4]],{local:true}); const lab=T.label(); const u=T.use(/raft/i); G.step(1/30,2);
    const R=G.cavePuzzles.raft;   // no waiting on the tide: the channel always runs toward the sluice
    return {ok:u==='Set the lantern on the raft'&&R.lantern&&R.state==='loaded'&&!G.items.lantern.carried&&R.moths>=20,level:+G.tide.level.toFixed(2),lab,state:R.state,raftMoths:R.moths,swarm:T.swarm(),bait:Math.round(G.moths.baitLeft),ichorUsed:ich-G.inv.count('ichor'),hud:T.hud()}; })()"""),
- ("raftRun", r"""(()=>{ const R=G.cavePuzzles.raft, O=G.cave.origin; const log=[]; let shots=0, page=null, steps=0, boarded=0, gripped=0, knocked=0;
+ ("raftRun", r"""(()=>{ const R=G.cavePuzzles.raft, O=G.cave.origin; const log=[]; let shots=0, page=null, pageTries=0, steps=0, boarded=0, gripped=0, knocked=0;
    G.on('brineling:board',()=>boarded++); G.on('brineling:grip',()=>gripped++); G.on('brineling:knocked',()=>knocked++);
    const r0=T.walk([[0,-82.5],[-6,-83.4],[-10,-85],[-10,-86],[-3,-86],[4,-86]],{local:true,sprint:true});
    const sw0=T.swarm(), at0=+R.runT.toFixed(1);
@@ -255,18 +258,20 @@ STEPS=[
      // fell 20 m back on a run with many raiders, and the page halfway along went by unread)
      const b=G.monsters.list.filter(m=>m.alive&&!m.dying&&m.raid&&Math.abs(m.pos.x-O.x-px)<8);
      if(b.length){ T.bolt(b[0]); shots++; steps+=46; continue; }
-     if(!page&&Math.abs(px-31)<1.5){ T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); continue; }
+     // (T.use answers 'NOPE:<what was offered>' when the prompt isn't the page: that used to count as read, and the page went by unread)
+     if(page!=='Read the page'&&pageTries<4&&Math.abs(px-31)<1.5){ pageTries++; T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); continue; }
      if(Math.abs(tx-px)>1.2)T.steer(tx+O.x,O.z-86.1); else T.keys(new Set());
      G.step(1/30,1); steps++; T.top();
      if(steps%150===0)log.push([+R.runT.toFixed(1),+R.t.toFixed(2),R.moths,T.swarm(),R.raiders|0].join('/')); }
    T.release(); const runT=+R.runT.toFixed(1), pushes=R.pushes|0;
-   if(!page&&G.cave.toLocal(G.player.pos).x<31){ T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); }   // still behind it: the page on the way
+   if(page!=='Read the page'&&G.cave.toLocal(G.player.pos).x<31){ T.walk([[31,-86.4]],{local:true}); page=T.use(/page/i); }   // still behind it: the page on the way
    // and on up the walkway to the raft at the gate (by a found path: past x 41 a lip of rock runs outside the rail, and a bot that has
    // wandered out onto it while shooting can't cross back in a straight line)
-   T.nav(Math.min(R.pos.x-O.x,44.5)-1,-86.1,{max:600});
-   return {ok:r0.ok&&(R.state==='arrived'||R.state==='done')&&page==='Read the page'&&G.caveBoss.pages.includes(2)&&T.swarm()>=G.cavePuzzles.seals.channel.needs
+   const nv=T.nav(Math.min(R.pos.x-O.x,44.5)-1,-86.1,{max:600});
+   // ending up there is part of the run: the sluice check after this one hooks the lantern back from the walkway beside the raft
+   return {ok:r0.ok&&nv.ok&&(R.state==='arrived'||R.state==='done')&&page==='Read the page'&&G.caveBoss.pages.includes(2)&&T.swarm()>=G.cavePuzzles.seals.channel.needs
        &&gripped>=3&&boarded>=1&&knocked>=1&&shots>=1&&runT<=35&&(pushes>0||runT>=25),
-     runT,pushes,atWalkway:at0,gripped,boarded,knocked,shots,swarmStart:sw0,swarm:T.swarm(),lost:T.losses.channel||0,log,pages:G.caveBoss.pages,at:T.where()}; })()"""),
+     runT,pushes,atWalkway:at0,gripped,boarded,knocked,shots,page,nav:nv.ok?undefined:nv,swarmStart:sw0,swarm:T.swarm(),lost:T.losses.channel||0,log,pages:G.caveBoss.pages,at:T.where()}; })()"""),
  ("sluice", r"""(()=>{ const s=G.cavePuzzles.seals.channel; const t=T.wait(20,{until:()=>s.cured}); T.wait(3);
    const crabs=G.monsters.list.filter(m=>m.alive&&!m.dying&&m.raid).length;
    const lab=T.label(); const u=T.use(/lantern/i); T.wait(1);
@@ -288,7 +293,10 @@ STEPS=[
    if(!L.shut)T.tap('shutter',3);
    if(G.cave.room(G.player.pos)!=='drafts')return {ok:false,why:'not in the hall of drafts (the gusts only run there)',at:T.where()};
    for(const [x,z] of [[60,-72],[60,-62],[60,-54],[60,-46],[60,-42]]){
-     let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
+     // (a crab that comes for the swarm while you wait for the gap is fought off, as a player would: stood still with it eating at
+     // arm's length, the wait for a quiet gap cost up to 8 moths, and the door seal further on needs 20)
+     const threat=()=>G.monsters.list.some(m=>m.alive&&!m.dying&&!/idle|return|wander/.test(m.state)&&m.pos.distanceTo(G.player.pos)<9&&G.cave.toLocal(m.pos).y>G.cave.water()-.9);
+     let w=0; while((gust.phase!=='idle'||gust.next<3.5)&&w<900){ if(threat()){ const f=T.fight({r:9,max:300,threats:true,each:seen}); w+=Math.max(1,f.steps); continue; } G.step(1/30,1); T.top(); seen(); w++; }   // a gust cycle is 6 s
      if(w>=900)return {ok:false,why:'no quiet gap between gusts in 30 s',gust:{phase:gust.phase,next:gust.next},at:T.where()};
      T.fight({r:9,max:600,threats:true}); T.walk([[x,z]],{local:true,each:seen}); if(z===-54&&!window._gustShot){ window._gustShot=1; } }
    const sw=T.swarm(); killedInGust=gust.lost-gl0;
@@ -380,10 +388,14 @@ STEPS=[
    const c=T.use(/Capture/); T.wait(2);
    const r2=T.walk([[40,73]],{max:3000});
    return {ok:/Release|Capture/.test(u)&&/Capture/.test(c)&&G.moths.jar.count>=44&&r2.ok,patch:[Math.round(p.x),Math.round(p.z)],r,swarm:sw,jar:G.moths.jar.count,r2}; })()"""),
- ("cureWithJar", r"""(()=>{ const b=G.blights.find(x=>x.id==='tidepool'); T.walk([[b.pos.x+2.5,b.pos.z]],{max:600}); const lab=T.label(); const u=T.use(/Release/); T.wait(1); const sw=T.swarm();
-   let t=0; const fights=[]; while(!b.cured&&t<3600){ const f=T.fight({r:14,max:300}); if(f.steps)fights.push(f.steps); T.walk([[b.pos.x+2.5,b.pos.z]],{max:300}); T.wait(1); t+=30+f.steps; }
+ ("cureWithJar", r"""(()=>{ const b=G.blights.find(x=>x.id==='tidepool'); T.walk([[b.pos.x+2.5,b.pos.z]],{max:600}); const lab=T.label();
+   // (T.use answers 'NOPE:<what was offered>' when another prompt or none is up, a hollow on top of you, say: then the jar stays
+   // corked, and the check used to fight on for its whole budget with nothing to feed the pool. Uncork it again, like a player would)
+   const uses=[]; let u=T.use(/Release/); uses.push(u); T.wait(1); const sw=T.swarm();
+   let t=0; const fights=[]; while(!b.cured&&t<3600){ const f=T.fight({r:14,max:300}); if(f.steps)fights.push(f.steps); T.walk([[b.pos.x+2.5,b.pos.z]],{max:300});
+     if(G.moths.jar.count>0&&uses.length<5){ u=T.use(/Release/); uses.push(u); } T.wait(1); t+=30+f.steps; }
    T.wait(3);
-   return {ok:/Release/.test(u)&&b.cured,lab,released:sw,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm()}; })()"""),
+   return {ok:/Release/.test(u)&&b.cured,lab,uses,released:sw,jar:G.moths.jar.count,fights,cured:b.cured,progress:Math.round(b.progress*100),swarm:T.swarm()}; })()"""),
  ("shot:blight-cured",None),
  # ---------------------------------------------------------------- camera random walk + draw calls
  ("cameraWalk", r"""(()=>{ const D=G.cave._debug, O=G.cave.origin, cv=document.querySelector('canvas'); const rng=G.U.rng(4242);
