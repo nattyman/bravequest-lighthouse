@@ -35,13 +35,13 @@ const X0=40, X1=260, Y0=-4, Y1=68;
 const TOWER_Z=-708;
 const LAYERS=[   // far → near (drawn in this order: back to front)
   {name:'far',  z:-756, z0:-800, z1:-724, soft:3.0, blur:4.0, a:.30},
-  {name:'mid',  z:TOWER_Z, z0:-724, z1:-662, soft:2.2, blur:3.0, a:.42},
-  {name:'near', z:-646, z0:-662, z1:-596, soft:1.7, blur:2.2, a:.52}];
+  {name:'mid',  z:TOWER_Z, z0:-724, z1:-662, soft:2.6, blur:3.0, a:.42},
+  {name:'near', z:-646, z0:-662, z1:-596, soft:2.2, blur:2.2, a:.52}];
 const MIST={z:-610, x0:10, x1:290, y0:-3, y1:9};
-const TEX=512, BAND=128;         // four bands of 128 rows: far, mid, near, mist
+const TEX=512, BAND=128, PAD=6; // four bands of 128 rows: far, mid, near, mist (PAD clear rows each side keep the mipmaps from bleeding)
 const COLS=256;                  // profile samples across (interpolated up to the texture's 512)
 
-const V={vis:0,force:null,built:false,mesh:null,mat:null,col:null,want:0,fogK:0,placeK:0,distK:0,why:''};
+const V={lr:-1,lg:-1,lb:-1,lm:-1,vis:0,force:null,built:false,mesh:null,mat:null,col:null,want:0,fogK:0,placeK:0,distK:0,why:''};
 const _c=new THREE.Color(), _t=new THREE.Color(), _m=new THREE.Color();
 const COOL=U.col('#232a3c'), MIST_TINT=U.col('#d8d4e6');
 
@@ -68,13 +68,14 @@ function profiles(){
     for(let pass=0;pass<2;pass++){ for(let i=0;i<COLS;i++){ let s=0,n=0; for(let k=-r;k<=r;k++){ const j=i+k; if(j<0||j>=COLS)continue; s+=p[j]; n++; } tmp[i]=s/n; } p.set(tmp); } }
   return out;
 }
-/* the wrecker's tower as a soft upright: its tapering body, the gallery slab, the fire-basket and its hood */
+/* the wrecker's tower as a soft upright: its tapering body and a rounded knot on top for the gallery and the fire-basket
+   (no spire: blurred at 700 m the hood would read as a steeple). A little fainter than the land, and softer-edged. */
 function towerA(x,y,T){
-  const t=clamp((y-T.base)/(T.top-T.base),0,1);
-  let w=y<T.top?lerp(3.7,2.7,t):y<T.top+.6?3.6:y<T.top+3.6?1.4:y<T.top+5?1.7*(1-(y-T.top-3.6)/1.4):0;
-  if(y<T.base-6)w=0;
-  const d=Math.abs(x-T.x)-w, soft=.85;
-  return (1-smooth(-soft,soft,d))*smooth(T.base-6,T.base+2,y);
+  const t=clamp((y-T.base)/(T.top-T.base),0,1), soft=1.5;
+  let w=lerp(3.7,2.7,t);
+  if(y>T.top-.5){ const u=(y-T.top+.5)/4.2; w=u<1?lerp(3.2,1.2,u*u):0; }
+  const d=Math.abs(x-T.x)-w;
+  return .82*(1-smooth(-soft,soft,d))*smooth(T.base-6,T.base+2,y)*(1-smooth(T.top+2.6,T.top+4.4,y));
 }
 // a small value noise (same idea as U.vnoise but kept local and seeded, so the haze is the same every load)
 const hs=(i,j)=>{ const s=Math.sin(i*127.1+j*311.7)*43758.5453; return s-Math.floor(s); };
@@ -82,9 +83,9 @@ function vn(x,y){ const i=Math.floor(x), j=Math.floor(y), fx=x-i, fy=y-j, ux=fx*
   return lerp(lerp(hs(i,j),hs(i+1,j),ux),lerp(hs(i,j+1),hs(i+1,j+1),ux),uy); }
 function draw(g,s){
   const P=profiles(), T=towerInfo(), img=g.createImageData(s,s), d=img.data;
-  const mpx=(X1-X0)/s, mpy=(Y1-Y0)/(BAND-4);
+  const mpx=(X1-X0)/s, mpy=(Y1-Y0)/(BAND-2*PAD);
   for(let l=0;l<4;l++){
-    for(let r=0;r<BAND;r++){ const row=l*BAND+r, inner=r>=2&&r<BAND-2, y=Y1-(r-2)*mpy;   // canvas top = high
+    for(let r=0;r<BAND;r++){ const row=l*BAND+r, inner=r>=PAD&&r<BAND-PAD, y=Y1-(r-PAD)*mpy;   // canvas top = high
       for(let i=0;i<s;i++){ let a=0;
         if(inner){ const x=X0+(i+.5)*mpx;
           if(l<3){ const L=LAYERS[l], p=P[l], fi=clamp((i+.5)/s*COLS-.5,0,COLS-1), i0=Math.floor(fi), i1=Math.min(COLS-1,i0+1), h=lerp(p[i0],p[i1],fi-i0);
@@ -96,9 +97,9 @@ function draw(g,s){
             a*=.3+.7*smooth(-1.5,10,y);
             a*=L.a;
           }else{ // the sea mist: a long low band, thickest just above the water, ragged along its length, gone at both ends
-            const wx=MIST.x0+(i+.5)/s*(MIST.x1-MIST.x0), my=MIST.y0+(BAND-2-r)/(BAND-4)*(MIST.y1-MIST.y0);
-            const k=Math.exp(-Math.pow((my-1.6)/2.6,2))*(1-smooth(70,140,Math.abs(wx-150)));
-            a=k*(.55+.45*vn(wx*.05,3.3))*(.75+.25*vn(wx*.2,7))*.38; }
+            const wx=MIST.x0+(i+.5)/s*(MIST.x1-MIST.x0), my=MIST.y0+(BAND-PAD-r)/(BAND-2*PAD)*(MIST.y1-MIST.y0);
+            const k=Math.exp(-Math.pow((my-1.8)/3.4,2))*(1-smooth(70,140,Math.abs(wx-150)));
+            a=k*(.55+.45*vn(wx*.05,3.3))*(.75+.25*vn(wx*.2,7))*.3; }
         }
         const o=(row*s+i)*4; d[o]=d[o+1]=d[o+2]=255; d[o+3]=Math.round(clamp(a,0,1)*255); } } }
   g.putImageData(img,0,0);
@@ -108,7 +109,7 @@ function build(){
   tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;
   // 4 quads in one geometry, far → near → mist, so the index order is back-to-front (one draw call, no self-sorting)
   const pos=[], uv=[], idx=[];
-  const quad=(x0,x1,y0,y1,z,band)=>{ const b=pos.length/3, v0=1-(band*BAND+BAND-2)/TEX, v1=1-(band*BAND+2)/TEX;
+  const quad=(x0,x1,y0,y1,z,band)=>{ const b=pos.length/3, v0=1-(band*BAND+BAND-PAD)/TEX, v1=1-(band*BAND+PAD)/TEX;
     pos.push(x0,y0,z, x1,y0,z, x1,y1,z, x0,y1,z); uv.push(0,v0, 1,v0, 1,v1, 0,v1); idx.push(b,b+1,b+2, b,b+2,b+3); };
   LAYERS.forEach((L,k)=>quad(X0,X1,Y0,Y1,L.z,k));
   quad(MIST.x0,MIST.x1,MIST.y0,MIST.y1,MIST.z,3);
@@ -134,13 +135,13 @@ function place(){
   V.why=''; return 1;
 }
 /* 0..1 from the fog: the island's ordinary air (density ~.0105, less inside the light) shows it, thick fog hides it */
-function fogK(){ const f=G.scene.fog; if(!f||f.density==null)return 1; const d=f.density; return 1-smooth(.0125,.023,d); }
+function fogK(){ const f=G.scene.fog; if(!f||f.density==null)return 1; const d=f.density; return 1-smooth(.0122,.0185,d); }
 
 G.system('northVeil',{order:88,modes:'always',
   init(){ try{ build(); }catch(e){ console.error('northVeil',e); } },
   update(dt){
     if(!V.built)return;
-    dt=dt||0;
+    dt=Math.max(0,dt||0);   // (the very first frame's dt can come out negative: rAF's timestamp predates G.start's clock)
     const cam=G.camera.position, C=(G.northIsle&&G.northIsle.centre)||{x:150,z:-700};
     const pk=place(), dist=Math.hypot(cam.x-C.x,cam.z-C.z), dk=smooth(400,480,dist), fk=fogK(), dark=clamp(G.atmo.dark||0,0,1);
     V.placeK=pk; V.distK=dk; V.fogK=fk;
@@ -148,16 +149,18 @@ G.system('northVeil',{order:88,modes:'always',
     if(V.force!=null)want=V.force?1:0;
     V.want=want;
     // snap out for hard cuts (into an interior, onto the island, the crossing's fog leg); otherwise ease
-    if(pk===0&&V.force==null)V.vis=0; else V.vis=U.damp(V.vis,want,want>V.vis?.9:2.2,dt);
+    if(pk===0&&V.force==null)V.vis=0; else V.vis=clamp(U.damp(V.vis,want,want>V.vis?.9:2.2,dt),0,1);
     const m=V.mesh; m.visible=V.vis>.003; if(!m.visible)return;
     // colour from the scene's own haze: a cooler, darker shade of the fog for the land; a paler one for the sea mist
     const fog=G.scene.fog, fc=fog&&fog.color?fog.color:_c.setRGB(.1,.1,.14);
     const cured=clamp(G.atmo.cured||0,0,1), clear=smooth(.0095,.005,fog&&fog.density!=null?fog.density:.01);
     _t.copy(fc).multiplyScalar(lerp(.6,.5,clear)).lerp(COOL,.18);
     _m.copy(fc).lerp(MIST_TINT,.16+.08*cured);
-    const c=V.col;
-    for(let v=0;v<16;v++){ const s=v<12?_t:_m; c[v*3]=s.r; c[v*3+1]=s.g; c[v*3+2]=s.b; }
-    m.geometry.attributes.color.needsUpdate=true;
+    // re-upload the 16 vertex colours only when the haze has actually changed (most frames it hasn't)
+    if(Math.abs(_t.r-V.lr)+Math.abs(_t.g-V.lg)+Math.abs(_t.b-V.lb)+Math.abs(_m.r-V.lm)>1e-4){ V.lr=_t.r; V.lg=_t.g; V.lb=_t.b; V.lm=_m.r;
+      const c=V.col;
+      for(let v=0;v<16;v++){ const s=v<12?_t:_m; c[v*3]=s.r; c[v*3+1]=s.g; c[v*3+2]=s.b; }
+      m.geometry.attributes.color.needsUpdate=true; }
     V.mat.opacity=clamp(V.vis*lerp(1,1.18,clear),0,1);
   }
 });
