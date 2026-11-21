@@ -325,6 +325,17 @@ G.on('player:attack',e=>{
   say('combos','The staff remembers more than a plain swing. Strike out of a roll, a sprint, a jump — or a jump on top of a jump. The pause menu keeps what you find.');
 });
 
+/* a phone has no Shift: the first long walk at full stick on touch points at the Sprint button (hud.js). Once only; a sprint
+   first (any device) means it's known and the line never comes. */
+let walkT=0;
+G.system('sprintNudge',{order:83,update(dt){
+  if(S.said.sprint||G.state.mode!=='play'||C.on)return; const P=G.player; if(!P)return;
+  if(P.sprinting){ S.said.sprint=1; return; }
+  const touch=!!(G.ui&&G.ui.usingTouch&&G.ui.usingTouch());
+  walkT=touch&&P.inputEnabled!==false&&P.state==='move'&&G.input.move().mag>.85?walkT+(dt||0):0;
+  if(walkT>8)say('sprint','Tap Sprint to break into a run. It keeps going until you stop or tap it again.',{priority:'low'});
+}});
+
 /* ---------------------------------------------------------------- save */
 G.persist&&G.persist.register('onboarding',{
   save:()=>({v:1,seen:Object.assign({},S.seen),said:Object.assign({},S.said),strikes:S.strikes|0}),
