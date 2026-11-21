@@ -62,12 +62,27 @@ function matrixOf(o,out){
 function tintOf(o){ const t=o.tint; if(t==null)return new THREE.Color(1,1,1); if(t.isColor)return t.clone(); if(typeof t==='number')return new THREE.Color(t,t,t);
   if(Array.isArray(t))return new THREE.Color(t[0],t[1],t[2]); return U.col(t); }
 
+/* ---------- every collider stands on its own rock ----------
+   A placement's colliders are worked out from the rim, not from the mesh, so a slip in that sum leaves a wall in open
+   grass (a scree fan's colliders once sat 26 m out on the north moor). Any circle whose centre is further than its
+   radius from every above-ground vertex of its piece is dropped, with a warning; K.debug.orphanCols lists them. */
+function orphanCheck(list){
+  const out=K.debug.orphanCols=[], gh=(x,z)=>(W.groundY||W.height)(x,z);
+  for(const o of list){ if(!o.col||!o.col.length)continue; const P=K.pieces[o.piece]; if(!P)continue;
+    const A=P.geo.attributes.position, pts=[]; matrixOf(o,_m);
+    for(let i=0;i<A.count;i+=P.step){ _v.fromBufferAttribute(A,i).applyMatrix4(_m); if(_v.y>gh(_v.x,_v.z)-.2)pts.push(_v.x,_v.z); }
+    o.col=o.col.filter(c=>{ let ok=false; for(let k=0;k<pts.length&&!ok;k+=2)ok=Math.hypot(pts[k]-c.x,pts[k+1]-c.z)<=c.r;
+      if(!ok){ out.push({piece:o.piece,x:o.x,z:o.z,col:{x:c.x,z:c.z,r:c.r}}); console.warn('[cliffkit] dropped a collider with no rock under it',o.piece,c.x.toFixed(1),c.z.toFixed(1)); }
+      return ok; }); }
+}
+
 /* ---------- build meshes from a placement list ---------- */
 let meshes=[];   // {mesh, piece, list:[placement], sea:bool, tris per instance}
 function clear(){ for(const m of meshes){ K.group.remove(m.mesh); if(m.sea)m.mesh.geometry.dispose(); } meshes=[]; }
 function place(list){
   if(!Object.keys(K.pieces).length)decode();
   clear(); K.placements=list.slice();
+  orphanCheck(K.placements);
   const by={};
   list.forEach((o,i)=>{ if(!K.pieces[o.piece])return; (by[o.piece]=by[o.piece]||[]).push(o); });
   const seaList=[];
@@ -269,9 +284,11 @@ function build(){
   const used={}; const near=(cls,i,span)=>{ const u=used[cls]; if(!u)return false; for(let d=-span;d<=span;d++)if(u[(i+d+N)%N])return true; return false; };
   const mark=(cls,i)=>{ (used[cls]=used[cls]||new Uint8Array(N))[i]=1; };
   const faceH=r=>TOP-Math.max(r.fy,-1);
-  /* colliders: circles across the piece's front, so a glider or walker meets the rock it sees */
+  /* colliders: circles across the piece's front, so a glider or walker meets the rock it sees. d0/d1 are distances out
+     along the rim normal; across it they follow the piece, lat() shift included (it is applied before this is called) */
   const colsFor=(o,r,d0,d1,y0,y1,halfW)=>{ const tx=r.nz, tz=-r.nx, c=[], n=Math.max(1,Math.round(halfW/2.2)), rad=Math.min(2.6,halfW/n+.4), dm=(d0+d1)/2;
-    for(let k=0;k<n;k++){ const s=n===1?0:lerp(-halfW+rad*.8,halfW-rad*.8,k/(n-1));
+    const sl=(o.x-r.lx)*tx+(o.z-r.lz)*tz;
+    for(let k=0;k<n;k++){ const s=sl+(n===1?0:lerp(-halfW+rad*.8,halfW-rad*.8,k/(n-1)));
       c.push({x:r.lx+r.nx*dm+tx*s,z:r.lz+r.nz*dm+tz*s,r:Math.max(.8,Math.min(rad,(d1-d0)/2+.6)),y0,y1}); }
     o.col=c; };
   /* back plane of a face piece: from its origin up (or down) the piece's height, tilted by pitch; push it in until every
@@ -331,9 +348,11 @@ function build(){
         const deep=gr<-1.9, g0=deep?-1.7:gr;
         const g1=deep?-3.2:gh(r.lx+r.nx*(dF+6),r.lz+r.nz*(dF+6)), pitch=clamp(Math.asin(clamp((g0-g1)/3.5,-1,1)),-.1,.38);
         const o={piece:'scree',y:Math.min(g0,gh(r.lx+r.nx*dF,r.lz+r.nz*dF))-.3*s,yaw:yawOf(r)+(R()-.5)*.35,pitch,roll:(R()-.5)*.08,scale:[s*RR(.8,1.2),s*RR(.75,1.15),s*RR(.85,1.15)],tint:tint(.02)};
-        const f=fitBack(r,o,3.7,.4,1); put(o,r,Math.min(f.dO,dF-.6)); lat(o,r,(R()-.5)*3);
+        const f=fitBack(r,o,3.7,.4,1), dP=Math.min(f.dO,dF-.6); put(o,r,dP); lat(o,r,(R()-.5)*3);
         const info=judge(o,!r.sea||g0>-1.4); if(!info||info.above<.3){ rej('scree','fit'); continue; }
-        if(info.walkHit)colsFor(o,r,dF,dF+2.2*o.scale[2],o.y-1,o.y+2.6*o.scale[1],3*o.scale[0]);
+        // the fan's toe, measured from where the piece stands: where the face meets gentle moor (the escarpment's steps)
+        // dF, the face's foot at this height, can lie 30 m out on the grass, and a collider there is an invisible wall
+        if(info.walkHit){ const c0=Math.min(dF,dP+.6); colsFor(o,r,c0,c0+2.2*o.scale[2],o.y-1,o.y+2.6*o.scale[1],3*o.scale[0]); }
         o.q=R()+(info.walkHit?.5:0); add(o); mark('scree',i); ok=true;
       }else{
         const d0=faceS(r,Math.max(r.fy,-1.4)+.3), gr=gh(r.lx+r.nx*(d0+3),r.lz+r.nz*(d0+3)), deep=gr<-1.9; if(deep&&d0>12)continue;
