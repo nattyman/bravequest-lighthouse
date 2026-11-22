@@ -177,6 +177,8 @@ const STARTS=[
   {id:'companions',name:'Companions',sub:'Loop running · Ember and Corvin with you · on the moor by the hollow log',group:'Companions',main:false},
   {id:'cliffs-sandbar',name:'Under the south cliff',sub:'Loop running, low tide · on the sand bar at the foot of the cliff, looking up the face',group:'The cliffs'},
   {id:'cliffs-lip',name:'The cliff edge',sub:'Loop running · on the headland at the east edge, the sea and the stacks below',group:'The cliffs'},
+  {id:'oils',name:'Staff oils: the bench',sub:'Loop running · at the shed’s table with kiln pitch and gorse, the Kilnfire recipe known',group:'Staff oils'},
+  {id:'oils-fight',name:'Staff oils: a fight',sub:'Loop running · 3 flasks of Kilnfire Oil on the belt · at the hamlet, its hollows ahead',group:'Staff oils'},
   {id:'testsave',name:'Continue test save',sub:'',group:'Saves',test:true}
 ];
 DT.starts=STARTS;
@@ -300,6 +302,25 @@ function northEnter(id){
         if(k===12&&g){ g.setPhase(3); g.setHp(Math.max(4,g.maxHp*.05)); }   // its last phase, nearly done
       }); } }
 }
+/* staff oils (oils.js, forage.js, alchemy.js; Spec: OILS.md): the loop save, then the oil state given through those modules' own
+   APIs once the save is applied, each only if it is loaded (so the start points work whatever has landed) */
+function oilsSave(id){
+  const s=loopSave({lantern:true}), h=LM().hamlet||{x:-20,y:12,z:30};
+  if(id==='oils'){ // outside, on the far side of the shed's alchemy bench from the shed, facing it
+    const S0=LM().shed||{x:150,y:42,z:33}, t=G.alchemy&&G.alchemy.table, w=t?t.world:V(S0.x+2.8,S0.y,S0.z-.6);
+    const dx=w.x-S0.x, dz=w.z-S0.z, L=Math.hypot(dx,dz)||1, x=w.x+dx/L*1.4, z=w.z+dz/L*1.4;
+    s.pos=[x,G.floorAt(x,z,w.y+2)+.05,z]; s.yaw=Math.atan2(w.x-x,w.z-z);
+  }else{ // east of the hamlet, facing in: its hollows are a few steps ahead
+    const x=h.x+12, z=h.z; s.pos=[x,G.floorAt(x,z,G.world.height(x,z)+2)+.05,z]; s.yaw=Math.atan2(h.x-x,h.z-z); }
+  s.cp=s.pos.slice(); s.cpYaw=s.yaw; s.cpName=id==='oils'?'the shed':'the hamlet';
+  return s;
+}
+function oilsGive(id){
+  const I=G.inv, A=G.alchemy, O=G.oils, has=k=>!!(I&&I.ITEMS&&I.ITEMS[k]);
+  if(A&&A.learn&&A.recipes&&A.recipes.kilnfire){ try{ A.learn('kilnfire',{silent:true}); }catch(e){ console.error('devtools learn',e); } }
+  if(id==='oils'){ if(has('pitch'))I.add('pitch',4,{silent:true}); if(has('gorse'))I.add('gorse',8,{silent:true}); return; }   // four brews' worth
+  if(O&&O.debug&&O.debug.give){ try{ O.debug.give('kilnfire',3); }catch(e){ console.error('devtools oils',e); } }
+}
 function caveSwarmAndEnter(room){
   setTide('low');
   giveSwarm(60);
@@ -312,7 +333,7 @@ function caveSwarmAndEnter(room){
    and the west tip. 'late' keeps progression.js's lateGame() (everything). */
 const ROUTE_ACT1=['needle','outcrop','attic','hounds'], ROUTE_LOOP=ROUTE_ACT1.concat(['stones','spire','roots','west']);
 function progressFor(id){
-  const shards=id==='lamp-failed'?['needle']:(id==='stag'||id==='finale'||id==='loop'||id==='companions')?ROUTE_ACT1:(id==='sandbar'||/^cave:/.test(id)||/^undercroft/.test(id)||/^temple/.test(id)||isNorth(id))?ROUTE_LOOP:null;
+  const shards=id==='lamp-failed'?['needle']:(id==='stag'||id==='finale'||id==='loop'||id==='companions'||id==='oils'||id==='oils-fight')?ROUTE_ACT1:(id==='sandbar'||/^cave:/.test(id)||/^undercroft/.test(id)||/^temple/.test(id)||isNorth(id))?ROUTE_LOOP:null;
   if(!shards)return null;
   const o={v:1,shards:{},caches:{},hearts:{},marks:{},spent:0,upgrades:{},freed:0,said:{}};
   for(const k of shards)o.shards[k]=1;
@@ -403,6 +424,7 @@ function runStart0(id){
     if(low)setTide('low');
     if(G.player.aimCamera)G.player.aimCamera(s.yaw,low?.1:.3);
     return; }
+  if(id==='oils'||id==='oils-fight'){ const s=oilsSave(id); F.begin(s); oilsGive(id); if(G.player.aimCamera)G.player.aimCamera(s.yaw,.3); return; }
   if(id==='companions'){ // companions.js: both earned (a fox and the raven freed), standing by the hollow log on the moor
     const s=loopSave({lantern:true}); const N=(G.creatures&&G.creatures.negatives)||[];
     s.freed=N.map((n,i)=>(n.kind==='raven'||(n.kind==='fox'&&i===N.findIndex(m=>m.kind==='fox')))?i:-1).filter(i=>i>=0);
@@ -659,7 +681,7 @@ function render(){
     h+=`<button type="button" data-act="recipes"${dis(!title&&G.alchemy)}>All recipes</button>
     <button type="button" data-act="swarm"${dis(!title)}>60-moth swarm</button>
     <button type="button" data-act="jar"${dis(!title&&G.moths&&G.moths.jar&&!G.moths.jar.owned)}>Moth jar</button>
-    <button type="button" data-act="heal"${dis(!title)}>Heal</button></div>
+    <button type="button" data-act="heal"${dis(!title)}>Heal</button>${oilButtons(title)}</div>
   ${G.progress?`<div class="dt-row"><span class="lbl">Progress <small>(${G.progress.shards} shards · ${G.progress.marks} marks)</small></span><div class="seg">
     <button type="button" data-prog="shard"${dis(!title)}>+1 Heart Shard</button><button type="button" data-prog="heart"${dis(!title)}>+1 Keeper’s Heart</button>
     <button type="button" data-prog="mark"${dis(!title)}>+1 Mark</button><button type="button" data-prog="wing"${dis(!title)}>+1 Moth Wing</button>
@@ -696,6 +718,13 @@ function render(){
   sheet.innerHTML=h; noteEl=$('dtNote'); noteEl.textContent=lastNote;
   if(focusKey){ const el=sheet.querySelector(focusKey); if(el&&!el.disabled){ try{el.focus({preventScroll:true});}catch(_){el.focus();} if(G.input.device==='gamepad')el.classList.add('pad-focus'); } }
 }
+/* a flask of each staff oil (oils.js) that has a recipe, when it is loaded */
+function oilButtons(title){ const O=G.oils; if(!(O&&O.OILS&&O.debug&&O.debug.give))return '';
+  const R=(G.alchemy&&G.alchemy.recipes)||{}, made=new Set(Object.keys(R).map(k=>R[k].oil).filter(Boolean));   // only oils that can be brewed yet
+  return Object.keys(O.OILS).filter(id=>made.has(id)).map(id=>`<button type="button" data-act="oil:${esc(id)}"${title?' disabled':''}>+1 ${esc(O.OILS[id].name||id)} flask</button>`).join(''); }
+function giveOil(id){ const O=G.oils; if(!(O&&O.debug&&O.debug.give))return 'No staff oils yet.'; testMode();
+  if(O.full&&O.full())return 'The belt is full ('+O.max+' flasks)';
+  O.debug.give(id,1); return '+1 '+((O.OILS[id]&&O.OILS[id].name)||id)+' flask · '+O.total()+' of '+O.max+' carried'; }
 function keyOf(el){ for(const a of ['data-capspeed','data-prog','data-start','data-cheat','data-give','data-act','data-tide','data-speed','data-tp','data-spawn']) if(el.hasAttribute(a))return `[${a}="${el.getAttribute(a)}"]`; return null; }
 function onClick(e){
   const b=e.target.closest('button'); if(!b||b.disabled)return;
@@ -718,6 +747,7 @@ function onClick(e){
     else if(d.act==='jar'){ testMode(); msg=G.moths.jar.give()?'The moth jar is yours':'You already have it'; }
     else if(d.act==='heal'){ G.player.heal(G.player.maxHp); msg='Healed'; }
     else if(d.act==='kill')msg=killNearby();
+    else if(d.act&&d.act.startsWith('oil:'))msg=giveOil(d.act.slice(4));
     else if(d.act==='mapReveal'){ testMode(); G.map.revealAll(); msg='The whole island is charted'; }
     else if(d.act==='mapCover'){ testMode(); G.map.reset(); msg='Clouds over everything again (they clear as you walk)'; }
     else if(d.act==='mapOpen'){ const from=opener; closePanel(from==='play'); G.map.open(); return; } // from play: stay paused under the map (it resumes on close)

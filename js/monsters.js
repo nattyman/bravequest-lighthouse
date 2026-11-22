@@ -865,6 +865,7 @@ function spawn(kind,pos,opts={}){
   return m;
 }
 function onHit(m,info){
+  if(info&&info.kind==='burn'){ burnHit(m,info); return; }
   if(m.kind==='drowned'){ hitDrowned(m,info); return; }
   if(!m.alive||m.dying)return;
   if(m.kind==='vigilant'&&vigilantGlance(m,info))return;   // the ink skin turns the blow (TEMPLE.md)
@@ -883,6 +884,13 @@ function onHit(m,info){
   if(m.hp<=0){die(m,info);return;}
   if(!m.boss&&info.kind!=='swarm'){ dropToken(m); if(m.state!=='board')setState(m,'hurt'); }
   if(m.boss&&m.state==='staggered')G.ui.shake&&G.ui.shake(.15);
+}
+/* a burn tick from a staff oil (oils.js): health only. No flinch, knockback, stagger or re-aggro; it can still kill.
+   The Vigilant's ink skin and the drowned ignore it. Spec: OILS.md */
+function burnHit(m,info){
+  if(!m.alive||m.dying||m.kind==='vigilant'||m.kind==='drowned')return;
+  m.hp-=info.damage||1; m.flash=Math.max(m.flash,.35); m.lastHit=G.time;
+  if(m.hp<=0)die(m,info);
 }
 function die(m,info){
   if(m.kind==='drowned'){ if(!m.dying)dieDrowned(m,info); return; }

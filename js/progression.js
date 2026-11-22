@@ -741,6 +741,10 @@ const INV_ICON={
   ichor:'<svg viewBox="0 0 16 16"><path d="M8 1.6C10 5 12.4 7.6 12.4 10.2A4.4 4.4 0 0 1 3.6 10.2C3.6 7.6 6 5 8 1.6z" fill="#0c0910" stroke="#9a6cff" stroke-width="1"/></svg>',
   mark:ICON.mark
 };
+// names, plurals and icons come from G.inv.ITEMS (alchemy.js) for any item not listed above, so a new satchel item needs no row here
+const invIcon=k=>INV_ICON[k]||(G.inv&&G.inv.icon?G.inv.icon(k):'');
+function invName(k,n){ const it=G.inv&&G.inv.ITEMS&&G.inv.ITEMS[k];
+  if(n>1)return k==='mark'?'Marks':(it&&it.plural)||(NAMES[k]||k)+'s'; return NAMES[k]||(it&&it.name)||k; }
 const have=k=>k==='mark'?marksHeld():(G.inv?G.inv.count(k):0);
 function available(u){ if(u.needs==='jar')return !!(G.moths&&G.moths.jar&&G.moths.jar.owned); return true; }
 function canBuy(id){ const u=UP[id]; if(!u||owns(id)||!available(u))return false; for(const k in u.cost)if(have(k)<u.cost[k])return false; return true; }
@@ -808,7 +812,7 @@ function renderTemper(){
     h+=`<div class="tmp-busy" aria-live="polite">${ICON[tempering.id]||''}<span>Tempering ${esc(tu?tu.name:'')}… the violet flame takes the metal</span></div>`; }
   for(const u of UPGRADES){
     const own=owns(u.id), ok=canBuy(u.id)&&!tempering, av=available(u);
-    const cost=own?'':Object.keys(u.cost).map(k=>`<span class="${have(k)<u.cost[k]?'short':''}">${INV_ICON[k]||''}${u.cost[k]} ${esc(NAMES[k]||k)}${u.cost[k]>1&&k!=='kelp'&&k!=='ichor'?'s':''} <small style="font-weight:400;color:#7a6a6e">(${have(k)})</small></span>`).join('');
+    const cost=own?'':Object.keys(u.cost).map(k=>`<span class="${have(k)<u.cost[k]?'short':''}">${invIcon(k)}${u.cost[k]} ${esc(invName(k,u.cost[k]))} <small style="font-weight:400;color:#7a6a6e">(${have(k)})</small></span>`).join('');
     h+=`<div class="tmp-up${own?' owned':ok?' ready':''}${justTempered===u.id?' just':''}${tempering&&tempering.id===u.id?' working':''}">${ICON[u.id]}<div><div class="nm">${esc(u.name)}</div><div class="eff">${esc(u.effect)}</div>
       ${own?'':`<div class="note">${esc(av?u.desc:'Needs the moth jar from the sea cave first.')}</div><div class="tmp-cost">${cost}</div>`}</div>
       ${own?`<span class="own">${S.upgrades[u.id]==='gift'?'Given':'Tempered'}</span>`:`<button class="btn" type="button" data-buy="${u.id}" ${ok?'':'disabled'} aria-label="Temper ${esc(u.name)}">${tempering&&tempering.id===u.id?'Tempering…':'Temper'}</button>`}</div>`;
