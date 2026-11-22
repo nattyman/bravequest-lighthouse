@@ -42,7 +42,7 @@ for(const n of ['thornback:sfx','thornback:glance','thornback:crack','thornback:
   G.on(n,e=>ev.push(pick(n,e)));
 function of(n){ return ev.filter(e=>e.n===n); }
 function flush(){ ev.length=0; }
-function play(){ const p=P(); if(G.state.mode==='dead'||p.alive===false)p.respawn(p.pos.clone(),p.heading); if(!document.getElementById('pause').hidden)document.getElementById('resume').click(); if(G.talk&&G.talk.isOpen)G.talk.close(); if(G.state.mode!=='play'&&G.state.mode!=='dead')G.setMode('play'); }
+function play(){ const p=P(); if(G.state.mode==='dead'||p.alive===false){ p.respawn(p.pos.clone(),p.heading); G.setMode('play'); } if(!document.getElementById('pause').hidden)document.getElementById('resume').click(); if(G.talk&&G.talk.isOpen)G.talk.close(); if(G.state.mode!=='play'&&G.state.mode!=='dead')G.setMode('play'); }
 function hold(){ const p=P(); if(p.alive!==false)p.hp=p.maxHp; }
 function settle(n){ play(); for(let i=0;i<(n||10);i++){ hold(); G.step(1/30,1); } if(G.progress&&G.progress.endReward)G.progress.endReward(); play(); }
 function clear(r,at){ const c=at||P().pos; let n=0; for(const m of G.monsters.list.slice())if(m.alive&&!m.dying&&Math.hypot(m.pos.x-c.x,m.pos.z-c.z)<(r||40)){ G.monsters.despawn(m); n++; } return n; }
@@ -246,13 +246,13 @@ async def main_checks(pg):
         lambda r:r['plain']>=20 and r['kiln']<=r['plain']*.6,LOOP)
 
     # leash: lure it off and run; it gives up, walks home and heals
-    await run(pg,'leash',120,"""(()=>{ T.play(); const h=G.thornback.homes[2]; let m=h.m; if(!m||!m.alive){ G.thornback.debug.fill(); m=h.m; } const p=G.player; T.flush();
-        p.teleport(h.x+9,null,h.z,-Math.PI/2); p.hp=p.maxHp; G.step(1/30,2); T.clear(30,{x:h.x+30,z:h.z});
-        const tA=T.until(()=>m.state!=='idle'&&m.state!=='return',4); m.hp=m.maxHp-6; m.cool=99;
+    await run(pg,'leash',120,"""(()=>{ T.play(); T.hold(); const h=G.thornback.homes[2]; if(h.m&&h.m.alive)G.monsters.despawn(h.m); h.m=null; G.thornback.debug.fill(); const m=h.m, p=G.player; T.flush();
+        p.teleport(h.x+9,null,h.z,-Math.PI/2); p.hp=p.maxHp; G.step(1/30,2); T.clear(8,{x:h.x+11,z:h.z});
+        const tA=T.until(()=>m.state!=='idle'&&m.state!=='return',4); m.cool=99; T.until(()=>{ T.hold(); return Math.hypot(m.pos.x-h.x,m.pos.z-h.z)>5; },5); m.hp=m.maxHp-6; const d0=+Math.hypot(m.pos.x-h.x,m.pos.z-h.z).toFixed(2);
         p.teleport(h.x+60,null,h.z-20,Math.PI/2); G.step(1/30,2);
-        T.hold(); const tR=T.until(()=>m.state==='return',6); const tI=T.until(()=>m.state==='idle',40);
-        return {tA,tR,tI,hp:m.hp,maxHp:m.maxHp,dHome:+Math.hypot(m.pos.x-h.x,m.pos.z-h.z).toFixed(2)}; })()""",
-        lambda r:r['tA']>=0 and r['tR']>=0 and r['tI']>=0 and r['hp']==r['maxHp'] and r['dHome']<2.5,LOOP)
+        T.hold(); const tR=T.until(()=>{ T.hold(); return m.state==='return'; },6); const tI=T.until(()=>{ T.hold(); return m.state==='idle'; },40);   // held: the fog's cold bites out here
+        return {tA,d0,tR,tI,state:m.state,alive:m.alive,mode:G.state.mode,pp:[+p.pos.x.toFixed(1),+p.pos.y.toFixed(1),+p.pos.z.toFixed(1)],far:G.thornback.T&&Math.hypot(p.pos.x-h.x,p.pos.z-h.z),hp:m.hp,maxHp:m.maxHp,dHome:+Math.hypot(m.pos.x-h.x,m.pos.z-h.z).toFixed(2)}; })()""",
+        lambda r:r['tA']>=0 and r['d0']>5 and r['tR']>=0 and r['tI']>=0 and r['hp']==r['maxHp'] and r['dHome']<2.5,LOOP)
 
     # respawn: minutes after a kill, and only out of sight
     await run(pg,'respawn',120,"""(()=>{ T.play(); T.hold(); const h=G.thornback.homes[0]; if(!h.m)G.thornback.debug.fill(); const p=G.player; T.flush();
