@@ -179,6 +179,7 @@ const STARTS=[
   {id:'cliffs-lip',name:'The cliff edge',sub:'Loop running · on the headland at the east edge, the sea and the stacks below',group:'The cliffs'},
   {id:'oils',name:'Staff oils: the bench',sub:'Loop running · at the shed’s table with kiln pitch and gorse, the Kilnfire recipe known',group:'Staff oils'},
   {id:'oils-fight',name:'Staff oils: a fight',sub:'Loop running · 3 flasks of Kilnfire Oil on the belt · at the hamlet, its hollows ahead',group:'Staff oils'},
+  {id:'oils-tree',name:'Staff oils: the old tree',sub:'Loop running · 3 Kilnfire flasks, 3 Keeper’s Marks, the recipe known · at the Resisting Tree’s roots, to draw sap',group:'Staff oils'},
   {id:'testsave',name:'Continue test save',sub:'',group:'Saves',test:true}
 ];
 DT.starts=STARTS;
@@ -321,6 +322,16 @@ function oilsGive(id){
   if(id==='oils'){ if(has('pitch'))I.add('pitch',4,{silent:true}); if(has('gorse'))I.add('gorse',8,{silent:true}); return; }   // four brews' worth
   if(O&&O.debug&&O.debug.give){ try{ O.debug.give('kilnfire',3); }catch(e){ console.error('devtools oils',e); } }
 }
+/* 'oils-tree' (forage.js's sap, progression.js's Fix section; Spec: OILS.md): the loop save at the Resisting Tree's roots,
+   facing the trunk, within reach of "Draw sap"; 3 Kilnfire flasks and the recipe from oilsGive; the Marks come with the
+   progress save (the Stag's 1 and the Gloaming's 2: one oil's fixing) */
+function oilsTreeSave(){
+  const s=loopSave({lantern:true}), t=LM().resistingTree||{x:-165,z:5}, x=t.x, z=t.z-5;
+  s.pos=[x,G.floorAt(x,z,G.world.height(x,z)+3)+.05,z]; s.yaw=Math.atan2(t.x-x,t.z-z);
+  s.cp=s.pos.slice(); s.cpYaw=s.yaw; s.cpName='the Resisting Tree';
+  return s;
+}
+function startOilsTree(F){ const s=oilsTreeSave(); F.begin(s); oilsGive('oils-tree'); if(G.player.aimCamera)G.player.aimCamera(s.yaw,.3); }
 function caveSwarmAndEnter(room){
   setTide('low');
   giveSwarm(60);
@@ -333,7 +344,7 @@ function caveSwarmAndEnter(room){
    and the west tip. 'late' keeps progression.js's lateGame() (everything). */
 const ROUTE_ACT1=['needle','outcrop','attic','hounds'], ROUTE_LOOP=ROUTE_ACT1.concat(['stones','spire','roots','west']);
 function progressFor(id){
-  const shards=id==='lamp-failed'?['needle']:(id==='stag'||id==='finale'||id==='loop'||id==='companions'||id==='oils'||id==='oils-fight')?ROUTE_ACT1:(id==='sandbar'||/^cave:/.test(id)||/^undercroft/.test(id)||/^temple/.test(id)||isNorth(id))?ROUTE_LOOP:null;
+  const shards=id==='lamp-failed'?['needle']:(id==='stag'||id==='finale'||id==='loop'||id==='companions'||id==='oils'||id==='oils-fight'||id==='oils-tree')?ROUTE_ACT1:(id==='sandbar'||/^cave:/.test(id)||/^undercroft/.test(id)||/^temple/.test(id)||isNorth(id))?ROUTE_LOOP:null;
   if(!shards)return null;
   const o={v:1,shards:{},caches:{},hearts:{},marks:{},spent:0,upgrades:{},freed:0,said:{}};
   for(const k of shards)o.shards[k]=1;
@@ -424,6 +435,7 @@ function runStart0(id){
     if(low)setTide('low');
     if(G.player.aimCamera)G.player.aimCamera(s.yaw,low?.1:.3);
     return; }
+  if(id==='oils-tree'){ startOilsTree(F); return; }
   if(id==='oils'||id==='oils-fight'){ const s=oilsSave(id); F.begin(s); oilsGive(id); if(G.player.aimCamera)G.player.aimCamera(s.yaw,.3); return; }
   if(id==='companions'){ // companions.js: both earned (a fox and the raven freed), standing by the hollow log on the moor
     const s=loopSave({lantern:true}); const N=(G.creatures&&G.creatures.negatives)||[];

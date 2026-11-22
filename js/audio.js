@@ -1648,6 +1648,39 @@ function wireOils(){
 const oilAPI={ get log(){return ol.log.slice();}, synth:OS, rec:OIL_REC,
   /** play an oil / forage sound by its synth name (dress, on, ignite, burn, off, pick, scrape) */
   play(name,pos){ return !!ofx(name,pos?new THREE.Vector3(pos.x,pos.y+1,pos.z):null); } };
+/* -- the Resisting Tree's sap and fixing an oil in the staff (forage.js, progression.js). Spec: OILS.md, slice 3.
+   Synth names: sap, dead, restored, fixed. No sweeps: slow swells, drips, a hum, a knock in the grain.
+   Recorded files: none yet. Reserved names (add each to SFX_LIST and OIL_REC when the file exists):
+     tree_sap (drawing sap; OIL_REC.sap), tree_dead (the tree dying; OIL_REC.dead), oil_fixed (fixing an oil; OIL_REC.fixed). -- */
+Object.assign(OS,{
+  // drawing sap: a slow, thick pull in the wood, two heavy drips, and under it two close tones that will not settle
+  // (o.n = the draw, 1-4: the unease grows a little each time)
+  sap(t,out,o){ const n=U.clamp((o&&o.n)||1,1,4), u=.006+n*.003;
+    const pull=envGain(out,t,.55,.03,.2,.6); noise(t,1.4,filt('lowpass',260,1.2,pull),true);
+    for(const [dt,f] of [[.75,520],[1.3,470]]){ const tt=t+dt, d=osc('sine',f,tt,tt+.22,envGain(out,tt,.004,.05,0,.18)); d.frequency.exponentialRampToValueAtTime(f*.55,tt+.16); }
+    const g=envGain(out,t+.1,.9,u,.6,1.2), lp=filt('lowpass',900,.7,g);
+    osc('sine',196,t+.1,t+3,lp); osc('sine',207.7+n*1.5,t+.1,t+3,lp); },   // G against A-flat, drifting a little sharper each draw
+  // the tree dies: the clearing's hum (a low violet chord, as if it had always been there) sags a semitone and falls away
+  dead(t,out){ const g=ctx.createGain(); g.gain.setValueAtTime(.0001,t); g.gain.linearRampToValueAtTime(.05,t+.35); g.gain.setTargetAtTime(.0001,t+.9,1.1); g.connect(out);
+    const lp=filt('lowpass',1200,.7,g); lp.frequency.setValueAtTime(1200,t+.4); lp.frequency.exponentialRampToValueAtTime(180,t+5);
+    for(const [f,ty,k] of [[73.4,'sine',1],[110,'sine',.7],[146.8,'triangle',.4],[147.6,'sine',.4]]){ const gg=ctx.createGain(); gg.gain.value=k; gg.connect(lp);
+      const v=osc(ty,f,t,t+6.5,gg); v.frequency.setValueAtTime(f,t+.6); v.frequency.exponentialRampToValueAtTime(f*.944,t+5); }
+    S.thud(t+.05,{dest:out,g:.06,f0:90,f1:45,dur:.5,click:0}); },
+  // the tree restored: the hum comes back up from nothing and opens into a fifth, with one soft bell over it
+  restored(t,out){ const g=ctx.createGain(); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.04,t+1.6); g.gain.setTargetAtTime(.0001,t+2.6,.7); g.connect(out);
+    const lp=filt('lowpass',300,.7,g); lp.frequency.exponentialRampToValueAtTime(1400,t+1.8);
+    for(const [f,k] of [[73.4,1],[110,.7],[146.8,.45]]){ const gg=ctx.createGain(); gg.gain.value=k; gg.connect(lp); const v=osc('sine',f*.944,t,t+5.5,gg); v.frequency.exponentialRampToValueAtTime(f,t+1.4); }
+    for(const [f,k] of [[587.3,1],[880,.45]])osc('sine',f,t+1.5,t+4.5,envGain(out,t+1.5,.01,.025*k,0,2.6)); },
+  // an oil fixed in the staff: it soaks into the grain (a low warm settle) and sets with one firm knock in the wood
+  fixed(t,out){ noise(t,.7,filt('lowpass',700,.9,envGain(out,t,.18,.025,.15,.35)),true); crackle(t+.1,out,4,.025,.45);
+    S.thud(t+.75,{dest:out,g:.14,f0:200,f1:95,dur:.16,click:.2,nf:1600});
+    osc('triangle',196,t+.75,t+2,filt('lowpass',600,1,envGain(out,t+.75,.004,.035,0,1))); osc('sine',294,t+.76,t+2,envGain(out,t+.76,.004,.015,0,.9)); }
+});
+{ const treeAt=()=>{ const F=G.forage, p=F&&F.tree&&F.tree.pos; return p?new THREE.Vector3(p.x,p.y+1.5,p.z):pNear(1); };
+  G.on('tree:sap',e=>{ if(!ctx||!e||e.draws>3)return; ofx('sap',pNear(.8),{ref:3,arg:{n:e.draws}}); });   // the fourth draw is the dying, below
+  G.on('tree:dead',()=>{ if(!ctx)return; ofx('sap',pNear(.8),{ref:3,arg:{n:4},gain:.6}); ofx('dead',treeAt(),{ref:10,delay:.5}); });
+  G.on('tree:restored',()=>{ if(!ctx)return; ofx('restored',treeAt(),{ref:10}); });
+  G.on('oil:fixed',e=>{ if(!ctx||!e||!e.id||e.restored)return; ofx('fixed',pNear(1.1),{ref:3}); }); }
 
 /* ---------- pause-menu controls ---------- */
 let volEl=null, musEl=null, muteEl=null;

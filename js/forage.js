@@ -301,12 +301,11 @@ const WARN='There is one more draw in it. If I take it, this tree dies, and the 
 // the tree's look always follows the saved state alone (no fades), so a reload at any stage shows that stage
 function treeLook(){ const RT=G.world&&G.world.resistingTree; if(!RT||!RT.set)return;
   RT.set(S.tree.dead?{dead:true}:{life:1-STEP*Math.min(SAFE,S.tree.draws)}); }
-function sapSound(){ try{ const A=G.audio; if(A&&A.ready&&A.S&&A.S.thud)A.S.thud(A.context.currentTime,{g:.08,dur:.3}); }catch(e){} }
 function giveSap(){ try{ if(G.inv&&G.inv.add)G.inv.add('sap',1); }catch(e){ console.error('forage sap',e); } }
 function drawSap(){
   if(!looping()||S.tree.dead)return 0;
   if(S.tree.draws>=SAFE){ warnCard(); return 0; }
-  S.tree.draws++; giveSap(); treeLook(); sapSound();
+  S.tree.draws++; giveSap(); treeLook();   // the sound is audio.js's, on 'tree:sap'
   try{ G.ui.say(SAP_SAY[S.tree.draws-1],null,{priority:'high'}); }catch(e){}
   G.emit('tree:sap',{draws:S.tree.draws});
   return S.tree.draws;

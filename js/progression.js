@@ -850,9 +850,7 @@ function renderTemper(){
   if(tab!=='temper')return;
   const ae=document.activeElement, keep=ae&&ae.dataset&&(ae.dataset.buy?`[data-buy="${ae.dataset.buy}"]`:ae.dataset.fix?`[data-fix="${ae.dataset.fix}"]`:'');
   let h='';
-  if(tempering&&tempering.oil){ const oo=OL().OILS[tempering.oil];
-    h+=`<div class="tmp-busy" aria-live="polite">${oilSvg(oo.color)}<span>Working ${esc(oo.name)} into the grain… the violet flame drinks the sap</span></div>`; }
-  else if(tempering){ const tu=UP[tempering.id];
+  if(tempering&&!tempering.oil){ const tu=UP[tempering.id];
     h+=`<div class="tmp-busy" aria-live="polite">${ICON[tempering.id]||''}<span>Tempering ${esc(tu?tu.name:'')}… the violet flame takes the metal</span></div>`; }
   for(const u of UPGRADES){
     const own=owns(u.id), ok=canBuy(u.id)&&!tempering, av=available(u);
@@ -864,11 +862,15 @@ function renderTemper(){
   h+=renderFix();
   listEl.innerHTML=h;
   if(keep){ const f=listEl.querySelector(`${keep}:not(:disabled)`)||listEl.querySelector('[data-buy]:not(:disabled),[data-fix]:not(:disabled)')||$('tabTemper'); try{f.focus({preventScroll:true});}catch(_){f.focus();} }
+  // fixing an oil: its banner sits in the Fix section, by the row that was chosen; keep it in view
+  if(tempering&&tempering.oil){ const el=listEl.querySelector('.tmp-busy'); if(el&&el.scrollIntoView)try{ el.scrollIntoView({block:'nearest'}); }catch(_){} }
 }
 function renderFix(){
   const rows=fixRows(); if(!rows.length)return '';
   const O=OL(), cur=O.fixed&&O.OILS[O.fixed];
   let h=`<div class="tmp-sec"><span class="eyebrow">Fix an oil in the grain</span><p class="tmp-lede">Work an oil into the staff with Heartsap and it stays, a little gentler, with no timer. One oil at a time: fixing another takes its place, and costs again.</p></div>`;
+  if(tempering&&tempering.oil){ const oo=O.OILS[tempering.oil];
+    h+=`<div class="tmp-busy" aria-live="polite">${oilSvg(oo.color)}<span>Working ${esc(oo.name)} into the grain… the violet flame drinks the sap</span></div>`; }
   for(const id of rows){
     const o=O.OILS[id], fixed=O.fixed===id, ok=canFix(id)&&!tempering, busy=tempering&&tempering.oil===id, miss=fixMissing(id);
     const cost=fixed?'':Object.keys(FIX_COST).map(k=>`<span class="${fixHave(id,k)<FIX_COST[k]?'short':''}">${k==='flask'?oilSvg(o.color):invIcon(k)}${FIX_COST[k]} ${esc(fixName(id,k,FIX_COST[k]))} <small style="font-weight:400;color:#7a6a6e">(${fixHave(id,k)})</small></span>`).join('');
