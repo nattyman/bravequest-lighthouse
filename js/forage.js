@@ -10,12 +10,15 @@
        undergrowth's plant list, well apart, on open walkable ground): walk into one for 1-2 blossom; it regrows in 240 s.
        All the blossom is one InstancedMesh (a picked bush's instance is scaled to zero) and every spot shares one Points
        glint, so the whole module adds a handful of draw calls.
+     · The Resisting Tree's roots: Interact "Draw sap". Three draws each give a Heartsap and leave the tree visibly weaker
+       (its light, halo and motes dimmed a step); a fourth is only taken through a warning card, and kills the tree: the
+       light goes out and the canopy greys. tree.restore() undoes all of it (for tests and a later storyline; nothing calls it).
    Nothing can be picked, scraped or read until the core loop is active (G.loop.active / 'loop:start').
    The kiln is drawn from the start; blossom and glints only once the loop runs.
    Save: G.persist 'forage' {v:1, left:{spotId:seconds}, notes:{kiln:true}, tree:{draws,dead}}; spots by id, never by index.
-   Events: forage:pick {id,item,n,pos} · forage:note {id}
-   API: G.forage = { ITEMS, spots:[{id,item,pos,ready,left}], kiln:{pos,noteRead}, tree (null until the tree is built),
-                     REGROW, debug:{ripen(), pick(id), near(item), tp(id), state()} }
+   Events: forage:pick {id,item,n,pos} · forage:note {id} · tree:sap {draws} · tree:dead · tree:restored
+   API: G.forage = { ITEMS, spots:[{id,item,pos,ready,left}], kiln:{pos,noteRead}, tree:{pos,draws,dead,restore()},
+                     REGROW, debug:{ripen(), pick(id), near(item), tp(id), state(), draw(), kill(), restore(), tpTree(), treeLook()} }
    ===================================================================== */
 (function(){
 'use strict';
@@ -41,7 +44,9 @@ const S={notes:{},tree:{draws:0,dead:false}};
 const spots=[];              // {id,item,pos,ready,left, i (gorse instance), top (glint pos), grow}
 const byId={};
 const kiln={pos:V(POT.x,0,POT.z),get noteRead(){ return !!S.notes.kiln; }};
-const F=G.forage={ITEMS,spots,kiln,tree:null,REGROW,get built(){ return built; }};   // tree: the Resisting Tree's sap comes later
+const LM=()=>(G.world&&G.world.landmarks)||{};
+const tree={pos:V(-165,0,5),get draws(){ return S.tree.draws; },get dead(){ return S.tree.dead; },restore:()=>restoreTree()};
+const F=G.forage={ITEMS,spots,kiln,tree,REGROW,get built(){ return built; }};
 
 /* ------------------------------------------------------------------ the kiln (one merged mesh + its outline, the pitch) */
 let kilnMesh=null, tar=null, built=false;
@@ -286,6 +291,50 @@ function readPage(){
 }
 G.on('cave:enter',()=>{ try{ buildPage(); }catch(e){ console.error('forage page',e); } });
 
+/* ------------------------------------------------------------------ the Resisting Tree's sap (Spec: OILS.md, slice 3) */
+const SAFE=3, STEP=.22;
+const SAP_SAY=['The sap comes slow and violet, warm as a lamp. The light in the clearing dips, then steadies.',
+  'Less this time. The leaves overhead have stopped moving.',
+  'A few drops. The tree is holding the fog off this clearing with what it has left.'];
+const DEAD_SAY='The light goes out of the old tree all at once. The wood is very quiet.';
+const WARN='There is one more draw in it. If I take it, this tree dies, and the clearing goes dark.';
+// the tree's look always follows the saved state alone (no fades), so a reload at any stage shows that stage
+function treeLook(){ const RT=G.world&&G.world.resistingTree; if(!RT||!RT.set)return;
+  RT.set(S.tree.dead?{dead:true}:{life:1-STEP*Math.min(SAFE,S.tree.draws)}); }
+function giveSap(){ try{ if(G.inv&&G.inv.add)G.inv.add('sap',1); }catch(e){ console.error('forage sap',e); } }
+function drawSap(){
+  if(!looping()||S.tree.dead)return 0;
+  if(S.tree.draws>=SAFE){ warnCard(); return 0; }
+  S.tree.draws++; giveSap(); treeLook();   // the sound is audio.js's, on 'tree:sap'
+  try{ G.ui.say(SAP_SAY[S.tree.draws-1],null,{priority:'high'}); }catch(e){}
+  G.emit('tree:sap',{draws:S.tree.draws});
+  return S.tree.draws;
+}
+function lastDraw(){
+  if(!looping()||S.tree.dead||S.tree.draws<SAFE)return false;
+  S.tree.draws=SAFE+1; S.tree.dead=true; giveSap(); treeLook();
+  try{ G.ui.say(DEAD_SAY,null,{priority:'high'}); }catch(e){}
+  G.emit('tree:sap',{draws:S.tree.draws}); G.emit('tree:dead');
+  return true;
+}
+function warnCard(){
+  const card={who:'Rowan',name:'Rowan',lines:[WARN],
+    choices:[{id:'leave',text:'Leave it be',action:()=>{}},{id:'take',text:'Take the last of it',action:()=>{ lastDraw(); }}]};
+  let ok=false; try{ ok=!!(G.talk&&G.talk.open&&G.talk.open(card)); }catch(e){ console.error('forage tree card',e); }
+  if(!ok)try{ G.ui.say(WARN,'Rowan',{priority:'high'}); }catch(e){}
+  return ok;
+}
+function restoreTree(){
+  S.tree={draws:0,dead:false}; treeLook(); G.emit('tree:restored'); return true;
+}
+function treePos(){ const t=LM().resistingTree||{x:-165,z:5}; tree.pos.set(t.x,H(t.x,t.z),t.z); return tree.pos; }
+function treePrompt(){
+  // the roots ring the trunk: the prompt reaches a little past the trunk's collider all round
+  G.interact.add({pos:()=>tree.pos,radius:6.2,priority:1,
+    label:()=>S.tree.draws>=SAFE?'Draw sap (the tree will not survive)':'Draw sap',
+    enabled:()=>isPlay()&&looping()&&!S.tree.dead,use:drawSap});
+}
+
 function walkIn(){
   const P=G.player; if(!P||!P.pos||P.alive===false||(G.cine&&G.cine.on))return;
   for(const s of spots){ if(s.item==='pitch'||!s.ready)continue;
@@ -314,7 +363,8 @@ const PERSIST={
   save:()=>{ const left={}; for(const s of spots)if(!s.ready&&s.left>0)left[s.id]=+s.left.toFixed(1);
     return {v:1,left,notes:Object.assign({},S.notes),tree:{draws:S.tree.draws|0,dead:!!S.tree.dead}}; },
   load:d=>{ d=d||{}; const left=d.left||{};
-    S.notes=Object.assign({},d.notes||{}); const t=d.tree||{}; S.tree={draws:t.draws|0,dead:!!t.dead};
+    S.notes=Object.assign({},d.notes||{}); const t=d.tree||{}, dead=!!t.dead;
+    S.tree={draws:dead?SAFE+1:Math.max(0,Math.min(SAFE,t.draws|0)),dead}; treeLook();
     for(const s of spots){ const l=+left[s.id]; if(l>0)setReady(s,false,l); else{ s.grow=1; setReady(s,true); } } }
 };
 const reg=()=>G.persist&&G.persist.register&&G.persist.register('forage',PERSIST);
@@ -329,6 +379,7 @@ G.system('forage',{order:56,modes:['play','paused','dead'],
     for(const it of ['gorse','holly'])try{ buildBush(it); }catch(e){ console.error('forage '+it,e); }
     try{ buildGlint(); }catch(e){ console.error('forage glint',e); }
     try{ buildPage(); }catch(e){}
+    treePos(); treeLook(); treePrompt();
     built=true;
     const pp=()=>V(POT.x,H(POT.x,POT.z)+.4,POT.z), np=()=>V(POST.x,H(POST.x,POST.z)+.6,POST.z);
     // a lower priority than the boat's own "Take the pitch", which shares the pot while that part is still wanted
@@ -353,6 +404,14 @@ F.debug={
       if(G.world.walkable&&!G.world.walkable(x,z))continue; if(G.collidersNear(x,z).some(c=>Math.hypot(c.x-x,c.z-z)<c.r+.5))continue; best={x,z}; break; }
     if(!best)best={x:s.pos.x+d,z:s.pos.z};
     P.teleport(best.x,G.floorAt(best.x,best.z,H(best.x,best.z)+3),best.z,Math.atan2(s.pos.x-best.x,s.pos.z-best.z)); return s; },
+  // the tree: draw() takes one draw as the prompt would (at 3 it opens the warning card); kill() takes the last draw
+  // straight away (from any stage); restore() brings the tree back; tpTree() stands the player at the roots facing the trunk
+  draw:()=>drawSap(), warn:()=>warnCard(),
+  kill(){ if(!looping()||S.tree.dead)return false; S.tree.draws=SAFE; return lastDraw(); },
+  restore:()=>restoreTree(),
+  tpTree(a){ const P=G.player; if(!P)return null; const p=treePos(), aa=a==null?-PI/2:a, d=5;
+    const x=p.x+Math.cos(aa)*d, z=p.z+Math.sin(aa)*d; P.teleport(x,G.floorAt(x,z,H(x,z)+3),z,Math.atan2(p.x-x,p.z-z)); return {x,z}; },
+  treeLook:()=>{ const RT=G.world&&G.world.resistingTree; return RT?{life:RT.life,dead:RT.dead,light:RT.light&&RT.light.intensity,halo:RT.halo.material.opacity,halo_v:RT.halo.visible,motes:RT.motes.visible}:null; },
   state:()=>({spots:spots.map(s=>({id:s.id,item:s.item,ready:s.ready,left:+s.left.toFixed(1),x:+s.pos.x.toFixed(1),z:+s.pos.z.toFixed(1)})),notes:Object.assign({},S.notes),tree:Object.assign({},S.tree)}),
   save:()=>PERSIST.save(), load:d=>PERSIST.load(d), readPage, get page(){ return page; }, POT, KC, POST, get mesh(){ return {kiln:kilnMesh,tar,bloom:bushes.gorse&&bushes.gorse.mesh,holly:bushes.holly&&bushes.holly.mesh,glint,page:page&&page.mesh}; }
 };

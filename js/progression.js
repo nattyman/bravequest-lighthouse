@@ -5,7 +5,8 @@
    - Keeper's Hearts from the Hollow Stag, the Undertow, the Tithe-Keeper (Hamlet Undercroft) and the Answer (the Vigil) (+1 heart each)
    - Moth Wings: every 2 negatives freed -> +20% stamina (4 max)
    - Keeper's Marks (currency) from 8 Keeper's Caches, bosses and first blight cures
-   - "Temper" tab on the keeper's benches (alchemy panel): 7 upgrades with real effects
+   - "Temper" tab on the keeper's benches (alchemy panel): 7 upgrades with real effects, and under them the staff oils'
+     "Fix an oil in the grain" section (one oil fixed at a time, paid in flasks, Heartsap and Marks; Spec: OILS.md)
    - G.progress.reward({id,name,desc,icon,eyebrow,item}): the shared "get item" moment (queued, never stacks)
    - the Journal (pause menu), persistence ('progress') with retroactive grants for old saves
    - the Journal's Record and Badges tabs and the welcome-back card on Continue (spec: RECORD.md, section 3), drawn from
@@ -16,7 +17,7 @@
    API: G.progress = {reward, state, maxHp(), marks, buy(id), owns(id), UPGRADES, spots, caches, journal:{open,close,tab(t)},
         welcome:{due(save), show(save), close(), open, enabled, allowInTests}, debug}
    Events: progress:shard {n,total} · progress:heart {src} · progress:wing {n} · progress:mark {n,src} · progress:cache {id}
-           progress:upgrade {id} · progress:reward {id}
+           progress:upgrade {id} · progress:fix {id,prev} · progress:reward {id}
    ===================================================================== */
 (function(){
 'use strict';
@@ -614,6 +615,10 @@ const CSS=`
 .tmp-cost span{display:inline-flex;align-items:center;gap:4px;font:600 13px var(--body);color:#3d2f33;font-variant-numeric:tabular-nums}
 .tmp-cost span.short{color:#a3304a}
 .tmp-cost svg{width:15px;height:15px}
+.tmp-sec{display:grid;gap:3px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(60,40,30,.25)}
+.tmp-sec .eyebrow{margin:0}
+.tmp-up.fix>svg{width:24px;height:30px;justify-self:center}
+.tmp-up .miss{font:600 12.5px var(--body);color:#a3304a;margin-top:3px}
 .tmp-lede{font-family:var(--serif);font-style:italic;font-size:15.5px;color:#3d2f33;margin:0}
 @media (max-width:520px){.tmp-up{grid-template-columns:28px 1fr}.tmp-up .btn,.tmp-up .own{grid-column:2;justify-self:start}}
 /* the Journal */
@@ -724,7 +729,7 @@ let cardT=null;
 function showCard(o){
   if(!card)return;
   const pips=o.pips?`<span class="rc-pips">${[1,2,3,4].map(i=>`<i class="${i<=o.pips?'on':''}"></i>`).join('')}</span>`:'';
-  card.innerHTML=`<div class="rc-ic">${ICON[o.icon]||ICON.shard}</div><span class="eyebrow">${esc(o.eyebrow||'')}</span><div class="rc-name">${esc(o.name)}</div><p class="rc-desc">${esc(o.desc||'')}</p>`+
+  card.innerHTML=`<div class="rc-ic">${o.svg||ICON[o.icon]||ICON.shard}</div><span class="eyebrow">${esc(o.eyebrow||'')}</span><div class="rc-name">${esc(o.name)}</div><p class="rc-desc">${esc(o.desc||'')}</p>`+
     ((o.sub||pips)?`<div class="rc-sub">${pips}${esc(o.sub||'')}</div>`:'');
   card.classList.add('show');
 }
@@ -769,15 +774,52 @@ function temperClang(i){
 }
 function temper(id){
   if(tempering||owns(id)||!canBuy(id))return false;
-  tempering={id}; renderTemper();
-  G.emit('progress:tempering',{id});
+  return forge({id},()=>buy(id));
+}
+/* the same few seconds at the bench fix an oil into the staff */
+function temperFix(id){
+  if(tempering||!canFix(id))return false;
+  return forge({id:'fix:'+id,oil:id},()=>fixOil(id));
+}
+function forge(t,done){
+  tempering=t; renderTemper();
+  G.emit('progress:tempering',{id:t.id});
   const fx=(h,n,o)=>{ try{ G.alchemy&&G.alchemy.benchFx&&G.alchemy.benchFx(h,n,o); }catch(_){} };
   fx('#c4a0ff',14,{radius:.25,up:1.2});
   TEMPER_STRIKES.forEach((s,i)=>setTimeout(()=>{ if(!tempering)return; temperClang(i); fx('#ffc070',10+i*5,{radius:.2,up:1.4+i*.3});
     const el=listEl&&listEl.querySelector('.tmp-busy'); if(el){ el.classList.remove('strike'); void el.offsetWidth; el.classList.add('strike'); } },s*1000));
-  setTimeout(()=>{ const t=tempering; tempering=null; if(!t)return; justTempered=t.id; const ok=buy(t.id); fx('#c4a0ff',ok?44:8,{radius:.35,up:2.4});
+  setTimeout(()=>{ const t=tempering; tempering=null; if(!t)return; justTempered=t.id; const ok=done(); fx('#c4a0ff',ok?44:8,{radius:.35,up:2.4});
     setTimeout(()=>{ justTempered=null; renderTemper(); },1600); },TEMPER_S*1000);
   return true;
+}
+/* ---- fixing an oil in the staff's grain (Spec: OILS.md): the Temper tab's second section. oils.js keeps which oil
+   is fixed and what it does; the cost is charged here, the Marks through the same S.spent as the upgrades. ---- */
+const FIX_COST={flask:3,sap:1,mark:3};
+const OL=()=>G.oils;
+const oilKnown=id=>{ const A=G.alchemy; if(!A||!A.known)return false; const R=A.recipes||{}; return Object.keys(R).some(k=>R[k].oil===id&&A.known.has(k)); };
+function fixRows(){ const O=OL(); if(!O||!O.OILS)return []; return Object.keys(O.OILS).filter(id=>oilKnown(id)||O.fixed===id); }
+const fixHave=(id,k)=>k==='flask'?OL().count(id):have(k);
+function fixMissing(id){ const out=[]; for(const k in FIX_COST){ const d=FIX_COST[k]-fixHave(id,k); if(d>0)out.push({k,n:d}); } return out; }
+function canFix(id){ const O=OL(); return !!(O&&O.OILS[id]&&O.fixed!==id&&oilKnown(id)&&!fixMissing(id).length); }
+const FIXED_TXT={
+  kilnfire:o=>`Always on: what you strike burns for ${o.burn.fixedSecs} s (a coat: ${o.burn.secs} s)`,
+  burst:o=>`Always on: a charged bolt bursts for ${o.burst.fixedDmg} within ${o.burst.fixedR} m (a coat: ${o.burst.dmg} within ${o.burst.r} m)`,
+  holly:o=>`Always on: struck monsters slow to ${Math.round(o.slow.fixedK*100)}% for ${o.slow.fixedSecs} s (a coat: ${Math.round(o.slow.k*100)}% for ${o.slow.secs} s)`
+};
+const fixedText=o=>FIXED_TXT[o.id]?FIXED_TXT[o.id](o):'Always on, a little gentler than a coat';
+const oilSvg=c=>`<svg viewBox="0 0 13 20" aria-hidden="true"><path d="M4.6 1.2h3.8v2h-.4v3.6l3.3 9.4a1.6 1.6 0 0 1-1.5 2.2H3.2a1.6 1.6 0 0 1-1.5-2.2L5 6.8V3.2h-.4z" fill="rgba(255,236,214,.5)" stroke="#5a4038" stroke-width="1" stroke-linejoin="round"/><path d="M3.1 12.4h6.8l1.6 4.2a.9.9 0 0 1-.8 1.2H2.3a.9.9 0 0 1-.8-1.2z" fill="${c}"/><rect x="4.9" y=".4" width="3.2" height="1.8" rx=".5" fill="#7a5638"/></svg>`;
+const fixName=(id,k,n)=>k==='flask'?OL().OILS[id].name.replace(/ Oil$/,'')+(n===1?' flask':' flasks'):invName(k,n);
+/** charge the cost and fix the oil now (o.free: no cost, for tests) */
+function fixOil(id,o={}){
+  const O=OL(); if(!O||!O.OILS[id]||O.fixed===id)return false;
+  if(!o.free){ if(!canFix(id))return false;
+    O.take(id,FIX_COST.flask); G.inv.take('sap',FIX_COST.sap); S.spent+=FIX_COST.mark; }
+  const prev=O.fixed; O.fix(id);
+  G.emit('progress:fix',{id,prev});
+  const oil=O.OILS[id];
+  if(!o.silent)rewardFn({id:'fix',svg:oilSvg(oil.color),name:oil.name,eyebrow:'Fixed in the staff’s grain',desc:fixedText(oil)+'.',
+    sub:(prev&&O.OILS[prev]?O.OILS[prev].name+' is gone from the grain · ':'')+marksHeld()+' '+(marksHeld()===1?'Mark':'Marks')+' left'});
+  renderTemper(); autosave(); return true;
 }
 function injectTemper(){
   const panel=$('alchemy'); if(!panel||tabsEl)return !!tabsEl;
@@ -787,7 +829,7 @@ function injectTemper(){
   head.after(tabsEl);
   listEl=document.createElement('div'); listEl.id='temperList'; tabsEl.after(listEl);
   tabsEl.addEventListener('click',e=>{ const b=e.target.closest('[data-tab]'); if(b)setTab(b.dataset.tab,true); });
-  listEl.addEventListener('click',e=>{ const b=e.target.closest('[data-buy]'); if(b&&!b.disabled)temper(b.dataset.buy); });
+  listEl.addEventListener('click',e=>{ const b=e.target.closest('[data-buy],[data-fix]'); if(b&&!b.disabled){ if(b.dataset.fix)temperFix(b.dataset.fix); else temper(b.dataset.buy); } });
   // left/right (keys or d-pad via the pad's arrow emulation) switch tabs when a tab has focus
   tabsEl.addEventListener('keydown',e=>{ if(e.code==='ArrowRight'||e.code==='ArrowLeft'){ setTab(tab==='brew'?'temper':'brew',true); e.preventDefault(); } });
   return true;
@@ -800,15 +842,15 @@ function setTab(t,focus){
   if(lede){ if(!lede.dataset.brew)lede.dataset.brew=lede.textContent;
     lede.textContent=t==='temper'?'Brass marks and a little alchemy: the keeper’s way of tempering tools. Each can be done once.':lede.dataset.brew; }
   if(t==='temper')renderTemper();
-  if(focus){ const f=t==='temper'?(listEl.querySelector('[data-buy]:not(:disabled)')||$('tabTemper')):$('tabBrew'); try{f.focus({preventScroll:true});}catch(_){f.focus();} if(G.input.device==='gamepad')f.classList.add('pad-focus'); }
+  if(focus){ const f=t==='temper'?(listEl.querySelector('[data-buy]:not(:disabled),[data-fix]:not(:disabled)')||$('tabTemper')):$('tabBrew'); try{f.focus({preventScroll:true});}catch(_){f.focus();} if(G.input.device==='gamepad')f.classList.add('pad-focus'); }
 }
 function renderTemper(){
   if(!tabsEl)return;
   $('temperMarks').innerHTML=ICON.mark+marksHeld()+' '+(marksHeld()===1?'Mark':'Marks');
   if(tab!=='temper')return;
-  const keep=document.activeElement&&document.activeElement.dataset&&document.activeElement.dataset.buy;
+  const ae=document.activeElement, keep=ae&&ae.dataset&&(ae.dataset.buy?`[data-buy="${ae.dataset.buy}"]`:ae.dataset.fix?`[data-fix="${ae.dataset.fix}"]`:'');
   let h='';
-  if(tempering){ const tu=UP[tempering.id];
+  if(tempering&&!tempering.oil){ const tu=UP[tempering.id];
     h+=`<div class="tmp-busy" aria-live="polite">${ICON[tempering.id]||''}<span>Tempering ${esc(tu?tu.name:'')}… the violet flame takes the metal</span></div>`; }
   for(const u of UPGRADES){
     const own=owns(u.id), ok=canBuy(u.id)&&!tempering, av=available(u);
@@ -817,8 +859,27 @@ function renderTemper(){
       ${own?'':`<div class="note">${esc(av?u.desc:'Needs the moth jar from the sea cave first.')}</div><div class="tmp-cost">${cost}</div>`}</div>
       ${own?`<span class="own">${S.upgrades[u.id]==='gift'?'Given':'Tempered'}</span>`:`<button class="btn" type="button" data-buy="${u.id}" ${ok?'':'disabled'} aria-label="Temper ${esc(u.name)}">${tempering&&tempering.id===u.id?'Tempering…':'Temper'}</button>`}</div>`;
   }
+  h+=renderFix();
   listEl.innerHTML=h;
-  if(keep){ const f=listEl.querySelector(`[data-buy="${keep}"]:not(:disabled)`)||listEl.querySelector('[data-buy]:not(:disabled)')||$('tabTemper'); try{f.focus({preventScroll:true});}catch(_){f.focus();} }
+  if(keep){ const f=listEl.querySelector(`${keep}:not(:disabled)`)||listEl.querySelector('[data-buy]:not(:disabled),[data-fix]:not(:disabled)')||$('tabTemper'); try{f.focus({preventScroll:true});}catch(_){f.focus();} }
+  // fixing an oil: its banner sits in the Fix section, by the row that was chosen; keep it in view
+  if(tempering&&tempering.oil){ const el=listEl.querySelector('.tmp-busy'); if(el&&el.scrollIntoView)try{ el.scrollIntoView({block:'nearest'}); }catch(_){} }
+}
+function renderFix(){
+  const rows=fixRows(); if(!rows.length)return '';
+  const O=OL(), cur=O.fixed&&O.OILS[O.fixed];
+  let h=`<div class="tmp-sec"><span class="eyebrow">Fix an oil in the grain</span><p class="tmp-lede">Work an oil into the staff with Heartsap and it stays, a little gentler, with no timer. One oil at a time: fixing another takes its place, and costs again.</p></div>`;
+  if(tempering&&tempering.oil){ const oo=O.OILS[tempering.oil];
+    h+=`<div class="tmp-busy" aria-live="polite">${oilSvg(oo.color)}<span>Working ${esc(oo.name)} into the grain… the violet flame drinks the sap</span></div>`; }
+  for(const id of rows){
+    const o=O.OILS[id], fixed=O.fixed===id, ok=canFix(id)&&!tempering, busy=tempering&&tempering.oil===id, miss=fixMissing(id);
+    const cost=fixed?'':Object.keys(FIX_COST).map(k=>`<span class="${fixHave(id,k)<FIX_COST[k]?'short':''}">${k==='flask'?oilSvg(o.color):invIcon(k)}${FIX_COST[k]} ${esc(fixName(id,k,FIX_COST[k]))} <small style="font-weight:400;color:#7a6a6e">(${fixHave(id,k)})</small></span>`).join('');
+    const why=fixed?'':miss.length?'You still need '+miss.map(m=>m.n+' more '+fixName(id,m.k,m.n)).join(', ')+'.':cur?'Takes the place of '+cur.name+'.':'';
+    h+=`<div class="tmp-up fix${fixed?' owned':ok?' ready':''}${justTempered==='fix:'+id?' just':''}${busy?' working':''}" data-fix-row="${id}">${oilSvg(o.color)}<div><div class="nm">${esc(o.name)}</div><div class="eff">${esc(fixedText(o))}</div>
+      ${fixed?'':`<div class="tmp-cost">${cost}</div>${why?`<div class="${miss.length?'miss':'note'}">${esc(why)}</div>`:''}`}</div>
+      ${fixed?'<span class="own">Fixed</span>':`<button class="btn" type="button" data-fix="${id}" ${ok?'':'disabled'} aria-label="Fix ${esc(o.name)} in the staff">${busy?'Fixing…':'Fix'}</button>`}</div>`;
+  }
+  return h;
 }
 function updatePanel(){
   const panel=$('alchemy'); if(!panel)return;
@@ -882,7 +943,7 @@ function journalData(){
   const bl=(G.blights&&G.blights.length?G.blights:[{id:'grove',name:'Blighted Grove'},{id:'tidepool',name:'Black Tide Pool'},{id:'well',name:'Choked Well'}]);
   const F=G.flow||{};
   return {hearts:maxHp()/2, shardsInto:shardN()%SHARDS_PER_HEART, shards:shardN(), shardTotal:SPOTS.length||12, wings:wingN(), marks:marksHeld(), earned:marksEarned(), spent:S.spent,
-    upgrades:UPGRADES.filter(u=>owns(u.id)).map(u=>u.id), caches:count(S.caches), cacheTotal:CACHES.length||8, freed:negs, freedTotal:negTotal,
+    upgrades:UPGRADES.filter(u=>owns(u.id)).map(u=>u.id), fixed:(OL()&&OL().fixed)||null, oils:fixRows(), caches:count(S.caches), cacheTotal:CACHES.length||8, freed:negs, freedTotal:negTotal,
     blights:bl.map(b=>({id:b.id,name:b.name,cured:!!b.cured})),
     bosses:[{id:'stag',name:'The Hollow Stag',done:!!(F.stagDead||S.hearts.stag)},{id:'gloaming',name:'The Gloaming',done:!!(F.bossDead||S.marks.gloaming)},{id:'undertow',name:'The Undertow',done:!!((G.caveBoss&&G.caveBoss.defeated)||S.hearts.undertow)},{id:'crane',name:'Aldous Crane, the Tithe-Keeper',done:!!((G.undercroftBoss&&G.undercroftBoss.defeated)||S.hearts.crane)},{id:'answer',name:'The Answer',done:!!((G.templeBoss&&G.templeBoss.defeated)||S.hearts.answer)},{id:'giant',name:'The Wreck Giant',done:!!((G.northFire&&G.northFire.state&&G.northFire.state.done)||S.hearts.giant)}],
     // Keeper's Hearts found, not won: the Margery's (shown once you've been to the north island)
@@ -902,6 +963,8 @@ function renderJournal(){
     <div class="jr-cell"><span class="k">Negatives freed</span><span class="v">${ICON.wing}${d.freed} <small style="font-size:16px;color:#6c5a5f">/ ${d.freedTotal}</small></span><span class="s">every two lend a wing</span></div>
   </div>
   <span class="eyebrow sec">Tempered</span><div class="jr-list">${UPGRADES.map(u=>`<span class="${owns(u.id)?'on':''}">${ICON[u.id]}${esc(u.name)}</span>`).join('')}</div>
+${d.oils.length?`
+  <span class="eyebrow sec">Fixed in the staff</span><div class="jr-list jr-fixed">${d.oils.map(id=>{ const o=OL().OILS[id]; return `<span class="${d.fixed===id?'on':''}" data-oil="${id}">${oilSvg(o.color)}${esc(o.name)}${d.fixed===id?' · fixed':''}</span>`; }).join('')}</div>`:''}
   <span class="eyebrow sec">Blights cured</span><div class="jr-list">${d.blights.map(b=>`<span class="${b.cured?'on':''}">${b.cured?check:''}${esc(b.name)}</span>`).join('')}</div>
   <span class="eyebrow sec">Bosses</span><div class="jr-list">${d.bosses.map(b=>`<span class="${b.done?'on':''}">${b.done?check:''}${esc(b.name)}</span>`).join('')}</div>${d.found.length?`
   <span class="eyebrow sec">Keeper’s Hearts at sea</span><div class="jr-list">${d.found.map(b=>`<span class="${b.done?'on':''}">${b.done?check:ICON.heart}${esc(b.name)}</span>`).join('')}</div>`:''}`;
@@ -1076,6 +1139,7 @@ G.persist.register('progress',{
 /* ---------------------------------------------------------------- API */
 const API=G.progress={
   reward:rewardFn, state:S, UPGRADES, owns, buy, temper, get tempering(){ return tempering&&tempering.id; }, canBuy, maxHp, apply:()=>apply(),
+  fix:{cost:FIX_COST, rows:fixRows, can:canFix, missing:fixMissing, now:fixOil, temper:temperFix},
   get marks(){ return marksHeld(); }, get shards(){ return shardN(); }, get wings(){ return wingN(); },
   get spots(){ return SPOTS; }, get caches(){ return CACHES; }, get busy(){ return !!reward.active||queue.length>0; },
   get rewarding(){ return reward.active?reward.active.id:null; },
@@ -1127,6 +1191,7 @@ G.system('progress',{order:62,modes:'always',
     G.on('negative:freed',onFreed);
     G.on('blight:cured',onBlight);
     G.on('inv:change',()=>{ if(tab==='temper')renderTemper(); });
+    G.on('oils:change',()=>{ if(tab==='temper')renderTemper(); });
     G.on('cave:jar',()=>apply({noHeal:true}));
     G.on('loop:start',()=>{ reconcileT=.5; });
     G.on('player:respawn',()=>{ if(reward.active)endLift(); });

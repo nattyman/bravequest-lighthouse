@@ -1093,14 +1093,47 @@ function buildResistingTree(){
   const N=150,mp=new Float32Array(N*3),ms=new Float32Array(N);
   for(let i=0;i<N;i++){const a=r()*TAU,rr=2.5+r()*12;mp[i*3]=Math.cos(a)*rr;mp[i*3+1]=r()*12;mp[i*3+2]=Math.sin(a)*rr;ms[i]=r();}
   const mg=new THREE.BufferGeometry(); mg.setAttribute('position',new THREE.BufferAttribute(mp,3)); mg.setAttribute('seed',new THREE.BufferAttribute(ms,1));
-  motes=new THREE.Points(mg,new THREE.ShaderMaterial({uniforms:{uTime:SH.time,uMap:{value:G.tex.flame}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
-    vertexShader:`uniform float uTime;attribute float seed;varying float vA;varying float vW;
+  motes=new THREE.Points(mg,new THREE.ShaderMaterial({uniforms:{uTime:SH.time,uMap:{value:G.tex.flame},uLife:{value:1}},transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    vertexShader:`uniform float uTime;uniform float uLife;attribute float seed;varying float vA;varying float vW;
 void main(){vec3 p=position;float t=uTime*(.15+seed*.2)+seed*20.;p.y=mod(p.y+t*1.5,12.)+.3;p.x+=sin(t*1.3+seed*9.)*1.2;p.z+=cos(t*1.1+seed*7.)*1.2;
   vA=smoothstep(0.,1.5,p.y)*(1.-smoothstep(9.,12.,p.y))*(.5+.5*sin(uTime*2.+seed*30.));vW=seed;
+  vA*=step(fract(seed*7.31),uLife)*(.45+.55*uLife);   // a weakened tree: fewer motes, and fainter (uLife 1 = as built)
   vec4 mv=modelViewMatrix*vec4(p,1.);gl_PointSize=clamp(90./-mv.z,1.5,9.);gl_Position=projectionMatrix*mv;}`,
     fragmentShader:`uniform sampler2D uMap;varying float vA;varying float vW;void main(){vec4 t=texture2D(uMap,gl_PointCoord);
   vec3 c=mix(vec3(1.4,.9,2.4),vec3(2.2,1.4,.7),step(.75,vW));gl_FragColor=vec4(c*t.a*vA,t.a*vA);}`}));
   motes.frustumCulled=false; g.add(motes);
+  // handles for the tree's health (forage.js draws its sap): life 1 = as built; lower dims the light (and shrinks its
+  // reach), the halo, the motes and the violet in the wood and roots, and dulls the leaves a little; dead puts them all out
+  // and drains the canopy to ash and the wood to a cold grey-brown. The light stays in the scene (intensity 0), so no
+  // material recompiles. set() is pure state: the same values always give the same look, and life 1 restores the build.
+  // glow = life squared: each draw is a clear step down (1, .61, .31, .12 for 0-3 draws), not a slow fade.
+  const LC=lmesh.geometry.attributes.color, leaf0=LC&&Float32Array.from(LC.array);
+  const TC=tmesh.geometry.attributes.color, wood0=TC&&Float32Array.from(TC.array);
+  const HALO0=halo.scale.clone(), LDIST0=treeLight.distance, TEM0=tm.emissive.clone(), LEM0=lmesh.material.emissive.clone();
+  const ASH=col('#a9adb2'), ASHE=col('#1e2024'), _c=new THREE.Color();
+  const RT=W.resistingTree={group:g,light:treeLight,halo,motes,canopy:lmesh,trunk:tmesh,life:1,glow:1,dead:false,
+    set(o){ o=o||{}; const dead=!!o.dead, k=dead?0:clamp(o.life==null?1:+o.life,0,1), gl=k*k, whole=!dead&&k>=1;
+      RT.life=k; RT.glow=gl; RT.dead=dead;
+      halo.material.opacity=.55*gl; halo.visible=gl>0; halo.scale.copy(HALO0).multiplyScalar(whole?1:.45+.55*gl);
+      motes.material.uniforms.uLife.value=gl; motes.visible=gl>0;
+      tm.emissiveIntensity=.35*gl; lmesh.material.emissiveIntensity=.5*gl;
+      tm.emissive.copy(TEM0); lmesh.material.emissive.copy(whole?LEM0:dead?ASHE:LEM0);
+      if(dead)lmesh.material.emissiveIntensity=.6;   // a flat grey lift so the ash reads at night: no colour, no pulse
+      if(treeLight){ treeLight.intensity=gl*2.2; treeLight.distance=whole?LDIST0:LDIST0*(.45+.55*gl); }
+      if(LC&&leaf0){ const A=LC.array;
+        if(whole)A.set(leaf0);
+        else{ const ash=dead?1:(1-gl)*.4;   // living: the leaves pale a little with each draw; dead: pale ash grey
+          for(let i=0;i<A.length;i+=3){ const l=leaf0[i]*.3+leaf0[i+1]*.55+leaf0[i+2]*.15;
+            if(dead){ const v=.42+l*.9; _c.setRGB(ASH.r*v,ASH.g*v,ASH.b*v); } else _c.setRGB(l,l,l*1.02);
+            A[i]=leaf0[i]+(_c.r-leaf0[i])*ash; A[i+1]=leaf0[i+1]+(_c.g-leaf0[i+1])*ash; A[i+2]=leaf0[i+2]+(_c.b-leaf0[i+2])*ash; } }
+        LC.needsUpdate=true; }
+      if(TC&&wood0){ const A=TC.array;
+        if(whole)A.set(wood0);
+        else{ const dr=dead?1:1-gl;   // the violet drains out of the wood: toward a cold grey-brown of the same lightness
+          for(let i=0;i<A.length;i+=3){ const l=wood0[i]*.3+wood0[i+1]*.55+wood0[i+2]*.15, tr=l*(dead?.95:1.05), tg=l*(dead?.93:1), tb=l*(dead?.9:.9);
+            A[i]=wood0[i]+(tr-wood0[i])*dr; A[i+1]=wood0[i+1]+(tg-wood0[i+1])*dr; A[i+2]=wood0[i+2]+(tb-wood0[i+2])*dr; } }
+        TC.needsUpdate=true; }
+      return RT; }};
 }
 
 /* =====================================================================
@@ -2410,7 +2443,7 @@ G.system('world',{order:0,modes:'always',
     if(grass){ updateGrass(false); updatePushers(); }
     // mushrooms pulse, tree glow breathes
     if(capMat){const p=.85+Math.sin(t*1.6)*.15; capMat.color.setRGB(p,p,p);}
-    if(treeLight)treeLight.intensity=2+Math.sin(t*.9)*.35;
+    if(treeLight){ const RT=W.resistingTree, k=RT?RT.glow:1; treeLight.intensity=(2+Math.sin(t*.9)*.35)*k; }
     for(const s of mists){const u=s.userData; s.position.x=u.x0+Math.sin(t*.05+u.vx*10)*12; s.position.z=u.z0+Math.cos(t*.04+u.vz*10)*8;
       s.material.opacity=u.base*(1-cured*.75)*(1-dark);}
     for(const s of smokes){const u=s.userData,ph=(t*.12+u.ph)%1; s.position.set(u.x+ph*2.5,u.y+ph*6,u.z+ph*1.2); const k=.8+ph*3; s.scale.set(k,k,1);
