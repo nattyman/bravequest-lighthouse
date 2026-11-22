@@ -59,7 +59,7 @@ is in `DEVELOPMENT.md`; the engine API is in `CONTRACT.md`.
 
 Jump again in the air for a **double jump** (a moth-wing flutter of the Traveler's Cloak; once per jump, needs the cloak). Holding jump still glides afterwards. Roll in the air to **dive**. While you hold strike to charge the staff, the camera moves over your shoulder and a violet reticle appears: aim with the camera (mouse, right stick, right-thumb drag) and release to send an ether bolt to the reticle (a full charge sends a stronger bolt; aim at the ground close by for the spin attack instead). While locked on, the bolt seeks the target.
 
-While you carry a flask of staff oil, the draught button waits for you to let go: a quick press still drinks, a press held about a third of a second dresses the staff instead (with two or more kinds of oil carried, it opens a small picker). A coat lasts 90 seconds of play.
+While you carry a flask of staff oil, the draught button waits for you to let go: a quick press still drinks, a press held about a third of a second dresses the staff instead (with two or more kinds of oil carried, it opens a small picker). A coat lasts 90 seconds of play: Kilnfire Oil sets what you strike burning, Burst Oil makes a charged bolt burst where it lands, Holly Ward slows what you strike. Their makings are gathered in the wild: kiln pitch, gorse, holly berries from the deep wood.
 
 ### Techniques
 

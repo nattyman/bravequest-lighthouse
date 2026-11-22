@@ -3,7 +3,8 @@ the stamina wheel (hidden at full, green / amber / exhausted / refill pulse) and
 non-standard Xbox layout, a ghost pad listed first, a null entry, a SecurityError, a permissions policy that forbids
 'gamepad', no pads), including A starting the game from the title; the touch buttons on a phone (where each sits, sizes,
 nothing overlapping, clear of the objective, the map/pause buttons and the safe areas, at four landscape phone sizes, a
-landscape tablet and portrait, each firing its own action) and the pause menu's touch legend.
+landscape tablet and portrait, each firing its own action; the bottle button with a staff oil carried: a tap drinks, a long
+press dresses the staff or opens the oil picker, nothing moves) and the pause menu's touch legend.
 Screenshots go to /tmp/claude-0/hud/ (desktop 1280x760, phone portrait 390x844 and landscape 844x390, the touch cluster at each size).
 usage: python3 test/hud_e2e.py [url]   (default http://localhost:8800/dev.html?debug&headless)
 """
@@ -229,6 +230,27 @@ TOUCH_JS=r"""(()=>{ const R=b=>{ const r=b.getBoundingClientRect(); return {x:(r
     fires[a]=b.dataset.act===a&&down.length===1&&down[0]===a?'ok':{hit:b.dataset.act,down}; }
   return {strike:s.w,off,sets,safe,questBottom:Math.round(quest.bottom),rollTop:Math.round(R(btn('roll')).t),fires,device:G.input.device}; })()"""
 
+# the bottle button with a staff oil on the belt (oils.js, the OIL HOOK in core.js): a tap still drinks, a long press dresses the
+# staff with one kind carried and opens the picker with two; nothing moves, and the picker card fits the screen
+OIL_TOUCH_JS=r"""(()=>{ const B=()=>document.querySelector('#touch button[data-act=potion]'), R=b=>{ const r=b.getBoundingClientRect(); return [Math.round(r.left),Math.round(r.top),Math.round(r.width)]; };
+  const press=(n)=>{ const b=B(); b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,pointerType:'touch',pointerId:7,isPrimary:true})); G.step(1/30,n);
+    b.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,pointerType:'touch',pointerId:7,isPrimary:true})); G.step(1/30,3); };
+  const ev={drink:0,apply:[]}; G.on('potion:drink',()=>ev.drink++); G.on('oil:apply',e=>ev.apply.push(e&&e.id));
+  if(!G.oils||!G.potions||!G.potions.debug)return {err:'no oils / potions debug'};
+  G.potions.debug.set(2); G.step(1/30,60);   /* the layout check just pressed Strike, Jump and Roll: let those finish first */ const before=B()&&!B().hidden?R(B()):null;
+  G.oils.debug.give('kilnfire',1); G.step(1/30,2); const armed=G.oils.armed(), withFlask=R(B());
+  G.player.hp=G.player.maxHp-4; press(3); const tap={drink:ev.drink,apply:ev.apply.length,flasks:G.oils.total()}; G.step(1/30,90);   // let the drink finish
+  press(12); const long={apply:ev.apply.slice(),drink:ev.drink-tap.drink,flasks:G.oils.total()}; G.step(1/30,45);
+  const coat=G.oils.active&&G.oils.active.id, after=R(B());
+  G.oils.debug.give('kilnfire',1); G.oils.debug.give('burst',1); G.step(1/30,2); press(12);
+  const pk=document.getElementById('oilPicker'), open=!!(pk&&!pk.hidden), mode=G.state.mode;
+  const sh=pk&&pk.querySelector('.sheet'), sr=sh&&sh.getBoundingClientRect(), opts=pk?[...pk.querySelectorAll('.opt')].map(b=>b.dataset.oil):[];
+  const fits=!!sr&&sr.left>=0&&sr.top>=0&&sr.right<=innerWidth&&sr.bottom<=innerHeight;
+  const small=pk?[...pk.querySelectorAll('.opt,#oilPickerBack')].filter(b=>b.getBoundingClientRect().height<40).map(b=>b.dataset.oil||b.id):[];
+  G.oils.closePicker(); G.step(1/30,2); const closed=G.state.mode;
+  G.oils.take('kilnfire',G.oils.count('kilnfire')); G.oils.take('burst',G.oils.count('burst')); G.oils.debug.expire(); G.step(1/30,2);
+  return {before,withFlask,after,armed,tap,long,coat,open,mode,opts,fits,small,closed,moved:JSON.stringify(before)!==JSON.stringify(withFlask)||JSON.stringify(before)!==JSON.stringify(after)}; })()"""
+
 LEGEND_JS=r"""(()=>{ const p=document.getElementById('pause'), t=p.querySelector('[data-touch-legend]'), k=p.querySelector('[data-kb-legend]'), pl=p.querySelector('[data-pad-legend]');
   const vis=e=>!!e&&!e.hidden&&e.getClientRects().length>0;
   return {mode:G.state.mode,device:G.input.device,touch:vis(t),kb:vis(k),pad:vis(pl),text:t?t.innerText.replace(/\s+/g,' '):'',
@@ -274,6 +296,15 @@ async def touch(b):
         clear=all(not v['close'] and not v['offscreen'] and not v['inStick'] and not v['overTop'] for v in r['sets'].values()) and r['sets']['all']['n']>=11
         check(f'touch:clear:{tag}',clear and r['rollTop']>=r['questBottom']+8,{'sets':r['sets'],'safe':r['safe'],'questBottom':r['questBottom'],'rollTop':r['rollTop']})
         check(f'touch:fires:{tag}',all(v=='ok' for v in r['fires'].values()),r['fires'])
+        # the bottle with a staff oil carried: tap drinks, long press dresses / opens the picker; then the layout checks again
+        o2=await pg.evaluate(OIL_TOUCH_JS)
+        ok=('err' not in o2 and o2['before'] and o2['armed'] and not o2['moved'] and o2['tap']=={'drink':1,'apply':0,'flasks':1}
+            and o2['long']['apply']==['kilnfire'] and o2['long']['drink']==0 and o2['long']['flasks']==0 and o2['coat']=='kilnfire'
+            and o2['open'] and o2['mode']=='paused' and o2['opts']==['kilnfire','burst'] and o2['fits'] and not o2['small'] and o2['closed']=='play')
+        check(f'touch:oil-bottle:{tag}',ok,o2)
+        r2=await pg.evaluate(TOUCH_JS)
+        clear2=all(not v['close'] and not v['offscreen'] and not v['inStick'] and not v['overTop'] for v in r2['sets'].values())
+        check(f'touch:oil-layout:{tag}',clear2 and r2['off']==r['off'] and all(v=='ok' for v in r2['fires'].values()),{'sets':r2['sets'],'off':r2['off']})
         await pg.evaluate("G.headless.draw(3)"); await pg.wait_for_timeout(300); await shot(pg,f'touch-cluster-{tag}')
         # the pause menu: the touch legend, with the button names and the held moves, and no keyboard rows
         await pg.evaluate("(()=>{ document.getElementById('pauseBtn').click(); G.step(1/30,2); })()"); await pg.wait_for_timeout(500)
