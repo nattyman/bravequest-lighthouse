@@ -47,7 +47,7 @@ const floorY=(p)=>{ try{ const y=G.floorAt(p.x,p.z,p.y+1.2); return isFinite(y)&
 
 /* ---------------------------------------------------------------- state (persisted) */
 const S={v:1,talks:{tamsin:0,corwin:0,wren:0,hob:0},said:{},rested:{},named:{},names:false,bossDead:false,
-  wren:{stage:'waiting',saved:false,met:false,loaf:0,hamletTalks:0},
+  wren:{stage:'waiting',saved:false,met:false,loaf:0,hamletTalks:0,holly:false},
   bells:false,sluice:false,gates:[0,0,0],trap:false,trapTold:false,register:false,registerEcho:false,pages:{},
   discovered:false,hal:{hamlet:false,came:false},glassFound:false};
 function save(){ return JSON.parse(JSON.stringify(S)); }
@@ -622,7 +622,15 @@ function talkHamletWren(){
   if(!G.talk)return;
   const n=S.wren.hamletTalks|0; S.wren.hamletTalks=n+1; const L=loopLines(); const lines=L[n%L.length];
   G.talk.open({who:'wren',name:'Wren',title:'Of Wickham’s End',portrait:hamletPortrait,lines,
-    choices:[{id:'loaf',text:'Trade a glowcap for a loaf (+1 heart)',needs:()=>!!(G.inv&&G.inv.has&&G.inv.has('glowcap')),action:loaf},leave('Take care, Wren.')]});
+    choices:[{id:'loaf',text:'Trade a glowcap for a loaf (+1 heart)',needs:()=>!!(G.inv&&G.inv.has&&G.inv.has('glowcap')),action:loaf},
+      {id:'holly',text:'Ask about the holly',needs:()=>!!(S.wren.saved&&S.wren.left&&!S.wren.holly&&G.loop&&G.loop.active),action:holly},leave('Take care, Wren.')]});
+}
+/* the holly (Spec: OILS.md): told once, it teaches the Holly Ward recipe; the choice is gone after that */
+function holly(){
+  S.wren.holly=true;
+  const A=G.alchemy; if(A&&A.learn&&!(A.known&&A.known.has&&A.known.has('holly')))A.learn('holly');
+  G.emit('wren:holly',{});
+  return {lines:['Tamsin hung holly over every door in Wickham’s End. She said the fog-things go slow near it, like wasps in the cold.','Crush the berries into pitch with a glowcap. It’s her mixing. I only watched.']};
 }
 const hamletPortrait=(g,w,h,glass)=>{ portrait('wren')(g,w,h,glass); // the same cameo, warmed: no ink at the hair, colour in the cheeks
   const cx=w/2, hy=h*.42, hr=w*.25; g.fillStyle='#d9b8a2'; g.beginPath(); g.ellipse(cx,hy,hr,hr*1.18,0,0,TAU); g.fill();

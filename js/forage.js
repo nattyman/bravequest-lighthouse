@@ -4,6 +4,8 @@
      · The charcoal-burners' kiln in the old wood: a cold turf-and-stone kiln with a pitch pot, there from a new game.
        Interact "Scrape pitch" for 2 pitch; the pot refills after 240 s of play. A note pinned to a post by the kiln
        teaches the Kilnfire recipe the first time it is read (later reads just show it again).
+     · The keeper's page on the sea cave's bench teaches Burst Oil (only readable inside the cave).
+     · Holly berries on ten of the deep wood's real holly bushes (more of them west of x=-150), the same way as the gorse.
      · Gorse blossom on a dozen of the moor's and headland's real gorse bushes (picked deterministically from the
        undergrowth's plant list, well apart, on open walkable ground): walk into one for 1-2 blossom; it regrows in 240 s.
        All the blossom is one InstancedMesh (a picked bush's instance is scaled to zero) and every spot shares one Points
@@ -19,7 +21,7 @@
 'use strict';
 const G=window.G, THREE=G.THREE, U=G.U;
 const PI=Math.PI, TAU=PI*2, V=(x,y,z)=>new THREE.Vector3(x,y,z);
-const REGROW=240, PICK_R=1.5, GORSE_N=12, GORSE_GAP=18, SCRAPE_N=2;
+const REGROW=240, PICK_R=1.5, GORSE_N=12, GORSE_GAP=18, HOLLY_N=10, HOLLY_GAP=14, SCRAPE_N=2;
 const ITEMS=['pitch','gorse','holly','sap'];
 const NOTE_WHO='A charcoal-burner’s note';
 const NOTE='Pitch off the kiln floor, worked warm into the wood. Gorse flower for the bite: nothing on this moor burns like gorse. A stick dressed so will carry fire a minute and more. Mind your sleeves.';
@@ -45,8 +47,8 @@ const F=G.forage={ITEMS,spots,kiln,tree:null,REGROW,get built(){ return built; }
 let kilnMesh=null, tar=null, built=false;
 function kilnGeo(GE,y0){
   const parts=[], rnd=U.rng(7051);
-  const turf=col('#5e6e3c'), earth=col('#6a543a'), soot=col('#2e2723'), hole=col('#0d0a0a'), stone=col('#6f6a62'), stone2=col('#5e5953'), moss=col('#4a5a34'),
-    wood=col('#5a4231'), wood2=col('#3e2e22'), iron=col('#2b2729'), paper=col('#d9cfb2'), ink=col('#6e6152'), char=col('#1b1716');
+  const turf=col('#6a7a44'), earth=col('#77603f'), soot=col('#3a312b'), hole=col('#0d0a0a'), stone=col('#9a948a'), stone2=col('#857f76'), moss=col('#4a5a34'),
+    wood=col('#5a4231'), wood2=col('#3e2e22'), iron=col('#2b2729'), paper=col('#f6eed8'), ink=col('#6e6152'), char=col('#1b1716');
   const lh=(x,z)=>H(KC.x+x,KC.z+z)-y0;                       // local ground height
   const md=new THREE.Vector2(POT.x-KC.x,POT.z-KC.z).normalize(), mA=Math.atan2(md.x,md.y);
   // the turf dome: low and lumpy, sooted round the vent, the mouth a dark arch toward the pot
@@ -94,7 +96,7 @@ function kilnGeo(GE,y0){
   // the note's post: a stake by the kiln with a sheet nailed to it, turned toward the trail
   { const x=POST.x-KC.x, z=POST.z-KC.z, g0=lh(x,z), ya=Math.atan2(POT.x-POST.x+.6,POT.z-POST.z+2.4);
     parts.push({g:new THREE.CylinderGeometry(.06,.075,1.25,6),m:GE.mat4(x,g0+.55,z,.05,0,-.04),c:wood2});
-    parts.push({g:new THREE.BoxGeometry(.34,.42,.015),m:GE.mat4(x+Math.sin(ya)*.075,g0+.88,z+Math.cos(ya)*.075,-.04,ya,.03),c:(p,nn,o)=>{ o.copy(paper); if(Math.abs(nn.x)+Math.abs(nn.z)>.5&&Math.sin(p.y*90)>.6)o.lerp(ink,.5); }});
+    parts.push({g:new THREE.BoxGeometry(.4,.5,.015),m:GE.mat4(x+Math.sin(ya)*.075,g0+.88,z+Math.cos(ya)*.075,-.04,ya,.03),c:(p,nn,o)=>{ o.copy(paper); if(Math.abs(nn.x)+Math.abs(nn.z)>.5&&Math.sin(p.y*90)>.6)o.lerp(ink,.5); }});
     parts.push({g:new THREE.CylinderGeometry(.015,.015,.05,4),m:GE.mat4(x+Math.sin(ya)*.09,g0+1.05,z+Math.cos(ya)*.09,PI/2,ya,0),c:iron}); }
   return GE.mergeParts(parts);
 }
@@ -113,55 +115,70 @@ function buildKiln(){
   return true;
 }
 
-/* ------------------------------------------------------------------ the gorse */
-let bloom=null, glint=null, gCol=null;
-const _m=new THREE.Matrix4(), _z=new THREE.Matrix4().makeScale(0,0,0), _p=new THREE.Vector3(), _s=new THREE.Vector3();
-function openGround(x,z,y){
+/* ------------------------------------------------------------------ the bushes: gorse on the moor, holly in the deep wood */
+// one table row per bush ingredient: which plants, how many, how far apart, where they may stand, how the fruit looks
+const BUSH={
+  gorse:{kind:'gorse',n:GORSE_N,gap:GORSE_GAP,clear:1.6,ring:2.6,glint:[1,.82,.32],speck:.055,max:110,keep:.6,lift:.035,
+    colors:['#f2c02c','#e9a91c','#f6d65e','#dca11a'],emissive:'#3a2806',
+    // spread out from the moor's middle, nudged toward the trails so they are found
+    first:c=>Math.hypot(c.o.x-20,c.o.z),score:(c,md)=>Math.min(md,55)-.6*Math.max(0,c.pd-5)},
+  holly:{kind:'holly',n:HOLLY_N,where:o=>o.x<-76,gap:HOLLY_GAP,clear:.9,ring:1.8,glint:[1,.42,.4],speck:.05,max:90,keep:.5,lift:.03,
+    colors:['#b8172a','#d22834','#9c1222','#e0403c'],emissive:'#3a0608',
+    // the deep wood, more of them west of x=-150: the far west counts as nearer when spreading them
+    first:c=>Math.hypot(c.o.x+190,c.o.z),score:(c,md)=>Math.min(md,40)+(c.o.x<-150?14:0)-.25*Math.max(0,c.pd-8)}
+};
+const bushes={};                 // item -> {mesh, list}
+let glint=null, gCol=null, kilnPt=-1;
+const _m=new THREE.Matrix4(), _z=new THREE.Matrix4().makeScale(0,0,0), _s=new THREE.Vector3();
+function openGround(x,z,y,B){
   const W=G.world;
   if(W.walkable&&!W.walkable(x,z))return false;
   if(y<3)return false;
   if(Math.abs(G.floorAt(x,z,y+2)-(y+.03))>.5)return false;                // nothing built over it
-  for(let k=0;k<8;k++){ const a=k/8*TAU, qx=x+Math.sin(a)*2.6, qz=z+Math.cos(a)*2.6;   // room all round: no cliff edge, no wall
+  for(let k=0;k<8;k++){ const a=k/8*TAU, qx=x+Math.sin(a)*B.ring, qz=z+Math.cos(a)*B.ring;   // room all round: no cliff edge, no wall
     if(W.walkable&&!W.walkable(qx,qz))return false; if(Math.abs(H(qx,qz)-y)>1.1)return false; }
-  for(const c of G.collidersNear(x,z))if(Math.hypot(c.x-x,c.z-z)<c.r+1.6)return false;
+  for(const c of G.collidersNear(x,z))if(Math.hypot(c.x-x,c.z-z)<c.r+B.clear)return false;
   for(const b of G.boxColliders){ if(Math.abs(b.x-x)>40||Math.abs(b.z-z)>40)continue; const cs=Math.cos(b.yaw||0), sn=Math.sin(b.yaw||0), dx=x-b.x, dz=z-b.z;
-    const lx=dx*cs-dz*sn, lz=dx*sn+dz*cs; if(Math.abs(lx)<b.hw+2&&Math.abs(lz)<b.hd+2)return false; }
+    const lx=dx*cs-dz*sn, lz=dx*sn+dz*cs; if(Math.abs(lx)<b.hw+B.clear+.4&&Math.abs(lz)<b.hd+B.clear+.4)return false; }
   const LM=W.landmarks||{};
-  for(const [k,r] of [['lighthouse',14],['cottage',11],['shed',8],['hamlet',17],['stones',9],['halloran',5],['start',5],['cliffPathTop',6],['cliffPathBottom',6]]){ const l=LM[k]; if(l&&Math.hypot(l.x-x,l.z-z)<r)return false; }
+  for(const [k,r] of [['lighthouse',14],['cottage',11],['shed',8],['hamlet',17],['stones',9],['halloran',5],['start',5],['cliffPathTop',6],['cliffPathBottom',6],['lanternSpot',5]]){ const l=LM[k]; if(l&&Math.hypot(l.x-x,l.z-z)<r)return false; }
+  const rt=LM.resistingTree; if(rt&&Math.hypot(rt.x-x,rt.z-z)<(rt.r||14)+3)return false;     // the Resisting Tree's clearing
+  const vh=LM.vigilHollow; if(vh&&Math.hypot(vh.x-x,vh.z-z)<(vh.r||8)+4)return false;        // the Vigil's hollow
+  for(const c of W.plantClearings||[])if(Math.hypot(c.x-x,c.z-z)<c.r+1)return false;
   return true;
 }
-function chooseGorse(){
+function choose(B){
   const UG=G.undergrowth; if(!UG||!UG.plants)return [];
   const W=G.world, cand=[];
-  for(const o of UG.plants('gorse')){ const y=o.y+.03; if(!openGround(o.x,o.z,y))continue;
+  for(const o of UG.plants(B.kind)){ const y=o.y+.03; if(B.where&&!B.where(o))continue; if(!openGround(o.x,o.z,y,B))continue;
     cand.push({o,pd:W.pathDist?W.pathDist(o.x,o.z):10,h:U.hash(o.x*.13+.7,o.z*.19-.3)}); }
   if(!cand.length)return [];
-  // spread them out: each next pick is the bush farthest from those already chosen, nudged toward the trails so they
-  // are found; never closer than GORSE_GAP. The first is the one nearest the moor's middle (deterministic).
+  // each next pick is the best-scoring bush that keeps its distance from those already chosen (deterministic)
   const pick=[]; let first=cand[0], fd=1e9;
-  for(const c of cand){ const d=Math.hypot(c.o.x-20,c.o.z-0)+c.h; if(d<fd){ fd=d; first=c; } }
+  for(const c of cand){ const d=B.first(c)+c.h; if(d<fd){ fd=d; first=c; } }
   pick.push(first);
-  while(pick.length<GORSE_N){ let best=null, bs=-1e9;
+  while(pick.length<B.n){ let best=null, bs=-1e9;
     for(const c of cand){ if(pick.includes(c))continue; let md=1e9; for(const p of pick)md=Math.min(md,Math.hypot(c.o.x-p.o.x,c.o.z-p.o.z));
-      if(md<GORSE_GAP)continue; const sc=Math.min(md,55)-.6*Math.max(0,c.pd-5)+c.h; if(sc>bs){ bs=sc; best=c; } }
+      if(md<B.gap)continue; const sc=B.score(c,md)+c.h; if(sc>bs){ bs=sc; best=c; } }
     if(!best)break; pick.push(best); }
   return pick.map(c=>c.o);
 }
-// blossom specks sampled off the gorse model's own upper surface, so they sit on the bush at its placement transform
-function bloomGeo(){
-  const UG=G.undergrowth, src=UG&&UG.kinds&&UG.kinds.gorse&&UG.kinds.gorse[0];
-  const parts=[], GE=G.world.geo, yel=[col('#f2c02c'),col('#e9a91c'),col('#f6d65e'),col('#dca11a')];
-  const speck=new THREE.OctahedronGeometry(.055,0);
+// fruit or flower specks sampled off the plant model's own upper surface, so they sit on the bush at its placement transform
+function fruitGeo(B){
+  const UG=G.undergrowth, src=UG&&UG.kinds&&UG.kinds[B.kind]&&UG.kinds[B.kind][0];
+  const parts=[], GE=G.world.geo, cs=B.colors.map(col);
+  const speck=B.kind==='holly'?new THREE.IcosahedronGeometry(B.speck,0):new THREE.OctahedronGeometry(B.speck,0);
   if(src){ const P=src.attributes.position, N=src.attributes.normal, h=src.userData.h||1, n=P.count; let k=0;
-    for(let i=0;i<n&&k<110;i++){ const j=(i*97+13)%n, y=P.getY(j), ny=N.getY(j); if(y<h*.3||ny<-.15)continue;
-      if(U.hash(P.getX(j)*31.7+j*.01,P.getZ(j)*27.3)>.6)continue;
-      const s=.75+U.hash(j*.37,1.3)*.6;
-      parts.push({g:speck,m:GE.mat4(P.getX(j)+N.getX(j)*.035,y+N.getY(j)*.035,P.getZ(j)+N.getZ(j)*.035,j,j*.7,0,s,s*.8,s),c:yel[j%4]}); k++; } }
-  else for(let i=0;i<40;i++){ const a=i*2.4, r=.2+(i%7)*.08; parts.push({g:speck,m:GE.mat4(Math.sin(a)*r,.4+(i%5)*.12,Math.cos(a)*r,i,i,0),c:yel[i%4]}); }
+    for(let i=0;i<n&&k<B.max;i++){ const j=(i*97+13)%n, y=P.getY(j), ny=N.getY(j); if(y<h*.3||ny<-.15)continue;
+      if(U.hash(P.getX(j)*31.7+j*.01,P.getZ(j)*27.3)>B.keep)continue;
+      const s=.75+U.hash(j*.37,1.3)*.6, x=P.getX(j)+N.getX(j)*B.lift, yy=y+N.getY(j)*B.lift, z=P.getZ(j)+N.getZ(j)*B.lift;
+      if(B.kind==='holly'){ for(let q=0;q<3;q++){ const a=q*2.1+j; parts.push({g:speck,m:GE.mat4(x+Math.sin(a)*.045,yy-q*.02,z+Math.cos(a)*.045,0,0,0,s),c:cs[(j+q)%4]}); } k+=3; }
+      else{ parts.push({g:speck,m:GE.mat4(x,yy,z,j,j*.7,0,s,s*.8,s),c:cs[j%4]}); k++; } } }
+  else for(let i=0;i<40;i++){ const a=i*2.4, r=.2+(i%7)*.08; parts.push({g:speck,m:GE.mat4(Math.sin(a)*r,.4+(i%5)*.12,Math.cos(a)*r,i,i,0),c:cs[i%4]}); }
   return GE.mergeParts(parts);
 }
-function bloomMat(){
-  const W=G.world, FO=W.fol, m=G.toon('#ffffff',{vertexColors:true,emissive:'#3a2806'});
+function fruitMat(B){
+  const W=G.world, FO=W.fol, m=G.toon('#ffffff',{vertexColors:true,emissive:B.emissive});
   if(FO&&FO.SH&&FO.wind){
     // sway with the bush under it: the undergrowth bends each plant by the shared wind field at its root, more with height
     m.onBeforeCompile=sh=>{ sh.uniforms.uTime=FO.SH.time; sh.uniforms.uWind=FO.SH.wind;
@@ -172,40 +189,44 @@ function bloomMat(){
   #endif
   mvPosition=modelViewMatrix*mvPosition;
   gl_Position=projectionMatrix*mvPosition;`); };
-    m.customProgramCacheKey=()=>'bqGorseBloom'+(m.defines&&m.defines.BQ_LQ!=null?'q':'');
+    m.customProgramCacheKey=()=>'bqBushFruit'+(m.defines&&m.defines.BQ_LQ!=null?'q':'');
     if(FO.mats)FO.mats.push(m); }
   G.nearFade&&G.nearFade(m,1.8,5.5);
   return m;
 }
-function buildGorse(){
-  const list=chooseGorse(); if(!list.length)return;
-  bloom=new THREE.InstancedMesh(bloomGeo(),bloomMat(),list.length);
-  bloom.name='gorseBlossom'; bloom.frustumCulled=false; bloom.castShadow=false; bloom.receiveShadow=true; bloom.visible=false;
-  const gp=new Float32Array((list.length+1)*3); gCol=new Float32Array((list.length+1)*3);
-  const hh=(G.undergrowth.kinds.gorse&&G.undergrowth.kinds.gorse[0].userData.h)||1;
-  list.forEach((o,i)=>{ const id='gorse:'+Math.round(o.x)+','+Math.round(o.z);
-    const s={id,item:'gorse',pos:V(o.x,o.y+.03,o.z),ready:true,left:0,i,q:o.q,sc:o.s,grow:1};
-    s.top=V(o.x,o.y+hh*o.s.y*.9,o.z); spots.push(s); byId[id]=s;
-    gp[i*3]=s.top.x; gp[i*3+1]=s.top.y+.1; gp[i*3+2]=s.top.z; place(s); });
-  bloom.instanceMatrix.needsUpdate=true; G.scene.add(bloom);
-  // one shared glint for every spot (the kiln's pot is the last point)
-  const kp=list.length; gp[kp*3]=POT.x; gp[kp*3+1]=H(POT.x,POT.z)+.75; gp[kp*3+2]=POT.z;
+function buildBush(item){
+  const B=BUSH[item], list=choose(B); if(!list.length)return [];
+  const mesh=new THREE.InstancedMesh(fruitGeo(B),fruitMat(B),list.length);
+  mesh.name=item==='gorse'?'gorseBlossom':'hollyBerries'; mesh.frustumCulled=false; mesh.castShadow=false; mesh.receiveShadow=true; mesh.visible=false;
+  const hh=(G.undergrowth.kinds[B.kind]&&G.undergrowth.kinds[B.kind][0].userData.h)||1, out=[];
+  bushes[item]={mesh,list:out};
+  list.forEach((o,i)=>{ const id=item+':'+Math.round(o.x)+','+Math.round(o.z);
+    const s={id,item,pos:V(o.x,o.y+.03,o.z),ready:true,left:0,i,q:o.q,sc:o.s,grow:1};
+    s.top=V(o.x,o.y+hh*o.s.y*.9,o.z); spots.push(s); byId[id]=s; out.push(s); place(s); });
+  mesh.instanceMatrix.needsUpdate=true; G.scene.add(mesh);
+  return out;
+}
+// one shared glint for every spot: each bush's crown, and the kiln's pot
+function buildGlint(){
+  const pts=spots.filter(s=>s.top||s.item==='pitch'), gp=new Float32Array(pts.length*3); gCol=new Float32Array(pts.length*3);
+  pts.forEach((s,k)=>{ s.gi=k; if(s.item==='pitch'){ kilnPt=k; gp[k*3]=POT.x; gp[k*3+1]=H(POT.x,POT.z)+.8; gp[k*3+2]=POT.z; }
+    else{ gp[k*3]=s.top.x; gp[k*3+1]=s.top.y+.1; gp[k*3+2]=s.top.z; } });
   const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(gp,3)); g.setAttribute('color',new THREE.BufferAttribute(gCol,3));
   glint=new THREE.Points(g,new THREE.PointsMaterial({size:.9,map:G.tex.flame,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true}));
-  glint.name='forageGlint'; glint.frustumCulled=false; glint.renderOrder=4; glint.visible=false; glint.userData.kiln=kp; G.scene.add(glint);
+  glint.name='forageGlint'; glint.frustumCulled=false; glint.renderOrder=4; glint.visible=false; G.scene.add(glint);
 }
 function place(s){
-  if(!bloom||s.i==null)return;
-  if(!s.ready){ bloom.setMatrixAt(s.i,_z); }
-  else{ const k=s.grow<1?.2+.8*U.smooth(0,1,s.grow):1; bloom.setMatrixAt(s.i,_m.compose(s.pos.clone().setY(s.pos.y-.03),s.q,_s.copy(s.sc).multiplyScalar(k))); }
-  bloom.instanceMatrix.needsUpdate=true;
+  const b=bushes[s.item]; if(!b||s.i==null)return; const mesh=b.mesh;
+  if(!s.ready){ mesh.setMatrixAt(s.i,_z); }
+  else{ const k=s.grow<1?.2+.8*U.smooth(0,1,s.grow):1; mesh.setMatrixAt(s.i,_m.compose(s.pos.clone().setY(s.pos.y-.03),s.q,_s.copy(s.sc).multiplyScalar(k))); }
+  mesh.instanceMatrix.needsUpdate=true;
 }
 
 /* ------------------------------------------------------------------ the kiln spot, picking, regrowing */
 function kilnSpot(){ const s={id:'kiln',item:'pitch',pos:kiln.pos,ready:true,left:0}; spots.push(s); byId.kiln=s; return s; }
 function setReady(s,ready,left){
   s.ready=ready; s.left=ready?0:Math.max(0,left==null?REGROW:left);
-  if(s.item==='gorse'){ s.grow=ready?(s.grow==null?1:s.grow):0; place(s); }
+  if(BUSH[s.item]){ s.grow=ready?(s.grow==null?1:s.grow):0; place(s); }
   if(s.id==='kiln')kilnLook();
 }
 function kilnLook(){ const s=byId.kiln; if(!tar||!s)return;
@@ -234,6 +255,37 @@ function readNote(){
   const A=G.alchemy; if(A&&A.learn&&!(A.known&&A.known.has&&A.known.has('kilnfire')))A.learn('kilnfire');
   if(first)G.emit('forage:note',{id:'kiln'});
 }
+/* ------------------------------------------------------------------ the keeper's page on the sea cave's bench */
+// it lies on the bench top at the end away from the apparatus; built into the cave's own group (hidden outside the cave)
+// once the cave has made its bench, so it never needs an anchor in cave.js
+const PAGE_WHO='A keeper’s page';
+const PAGE='Pitch, brine crystal ground fine, and a little of the black stuff the fog-things leave. It does nothing until the ether strikes it. Then stand well back.';
+let page=null;
+function caveTable(){ const C=G.cave, A=G.alchemy; if(!C||!C.room||!A||!A.tables)return null;
+  return A.tables.find(t=>t&&t.world&&C.room(t.world))||null; }
+function buildPage(){
+  if(page)return true; const t=caveTable(); if(!t||!t.grp)return false;
+  const tex=G.canvasTex(128,(g,sz)=>{ g.fillStyle='#e9dfc4'; g.fillRect(0,0,sz,sz);
+    const r=U.rng(4417); g.strokeStyle='rgba(70,52,40,.75)'; g.lineWidth=2;
+    for(let y=18;y<sz-12;y+=11){ let x=12; g.beginPath(); g.moveTo(x,y); while(x<sz-14-r()*20){ x+=4+r()*9; g.lineTo(x,y+(r()-.5)*2.5); } g.stroke(); }
+    g.fillStyle='rgba(120,90,60,.25)'; g.beginPath(); g.arc(sz*.78,sz*.8,14,0,TAU); g.fill(); },true);
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(.3,.4),G.toon('#ffffff',{map:tex,emissive:'#5e5240',side:THREE.DoubleSide}));
+  m.name='keeperPage'; m.rotation.set(-PI/2,0,.3); m.position.set(-.85,1.006,.1); t.grp.add(m); m.updateMatrixWorld(true);
+  const w=new THREE.Vector3(); m.getWorldPosition(w); w.y=t.world.y;
+  page={mesh:m,pos:w,table:t};
+  G.interact.add({pos:()=>page.pos,radius:1.3,priority:2,label:'Read the keeper’s page',
+    enabled:()=>isPlay()&&looping()&&!!(G.cave&&G.cave.inside),use:readPage});
+  return true;
+}
+function readPage(){
+  if(!looping()||!(G.cave&&G.cave.inside))return;
+  try{ G.ui.say(PAGE,PAGE_WHO,{priority:'high'}); }catch(e){}
+  const first=!S.notes.cavePage; S.notes.cavePage=true;
+  const A=G.alchemy; if(A&&A.learn&&!(A.known&&A.known.has&&A.known.has('burst')))A.learn('burst');
+  if(first)G.emit('forage:note',{id:'cavePage'});
+}
+G.on('cave:enter',()=>{ try{ buildPage(); }catch(e){ console.error('forage page',e); } });
+
 function walkIn(){
   const P=G.player; if(!P||!P.pos||P.alive===false||(G.cine&&G.cine.on))return;
   for(const s of spots){ if(s.item==='pitch'||!s.ready)continue;
@@ -247,11 +299,12 @@ function tick(dt){
   }
 }
 function twinkle(){
-  if(!glint)return; const on=looping(); bloom.visible=on; glint.visible=on; if(!on)return;
-  const t=G.time||0, kp=glint.userData.kiln;
-  for(const s of spots){ const i=s.item==='pitch'?kp:s.i; if(i==null)continue;
+  const on=looping(); for(const k in bushes)bushes[k].mesh.visible=on;
+  if(!glint)return; glint.visible=on; if(!on)return;
+  const t=G.time||0;
+  for(const s of spots){ const i=s.gi; if(i==null)continue;
     let k=0; if(s.ready){ const w=Math.max(0,Math.sin(t*1.3+i*2.17)); k=.28+.9*Math.pow(w,8); }
-    const c=s.item==='pitch'?[.75,.62,.45]:[1,.82,.32]; const kk=s.item==='pitch'?k*.55:k;
+    const c=s.item==='pitch'?[.95,.72,.42]:BUSH[s.item].glint; const kk=s.item==='pitch'?k*.8:k;
     gCol[i*3]=c[0]*kk; gCol[i*3+1]=c[1]*kk; gCol[i*3+2]=c[2]*kk; }
   glint.geometry.attributes.color.needsUpdate=true;
 }
@@ -273,7 +326,9 @@ G.system('forage',{order:56,modes:['play','paused','dead'],
   init(){
     try{ buildKiln(); }catch(e){ console.error('forage kiln',e); }
     kilnSpot(); kilnLook();
-    try{ buildGorse(); }catch(e){ console.error('forage gorse',e); }
+    for(const it of ['gorse','holly'])try{ buildBush(it); }catch(e){ console.error('forage '+it,e); }
+    try{ buildGlint(); }catch(e){ console.error('forage glint',e); }
+    try{ buildPage(); }catch(e){}
     built=true;
     const pp=()=>V(POT.x,H(POT.x,POT.z)+.4,POT.z), np=()=>V(POST.x,H(POST.x,POST.z)+.6,POST.z);
     // a lower priority than the boat's own "Take the pitch", which shares the pot while that part is still wanted
@@ -299,6 +354,6 @@ F.debug={
     if(!best)best={x:s.pos.x+d,z:s.pos.z};
     P.teleport(best.x,G.floorAt(best.x,best.z,H(best.x,best.z)+3),best.z,Math.atan2(s.pos.x-best.x,s.pos.z-best.z)); return s; },
   state:()=>({spots:spots.map(s=>({id:s.id,item:s.item,ready:s.ready,left:+s.left.toFixed(1),x:+s.pos.x.toFixed(1),z:+s.pos.z.toFixed(1)})),notes:Object.assign({},S.notes),tree:Object.assign({},S.tree)}),
-  save:()=>PERSIST.save(), load:d=>PERSIST.load(d), POT, KC, POST, get mesh(){ return {kiln:kilnMesh,tar,bloom,glint}; }
+  save:()=>PERSIST.save(), load:d=>PERSIST.load(d), readPage, get page(){ return page; }, POT, KC, POST, get mesh(){ return {kiln:kilnMesh,tar,bloom:bushes.gorse&&bushes.gorse.mesh,holly:bushes.holly&&bushes.holly.mesh,glint,page:page&&page.mesh}; }
 };
 })();
