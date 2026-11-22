@@ -4,11 +4,13 @@
            has, strength, fix, unfix, burning, slowed, openPicker, debug}
    Carry up to three flasks (any mix), dress the staff in the field (V, or hold the draught action:
    core.js turns a long hold into the 'oil' action while a flask is carried), and the coat lasts a
-   while of play. Kilnfire sets struck monsters burning. The table is shared by every oil; only
-   Kilnfire's effect is built so far. Brewed at the alchemy table (alchemy.js calls G.oils.add).
+   while of play. Kilnfire burns, Burst bursts a bolt where it ends, Holly Ward slows. One oil at a time can be
+   fixed into the staff (the Temper tab in progression.js charges for it and calls fix()): it then works always, with
+   no timer, at the gentler numbers in its row (fixed*); a coat of another oil works on top of it, a coat of the same
+   oil is full strength while it lasts. Brewed at the alchemy table (alchemy.js calls G.oils.add).
    Hooks used in player.js: actionLock, speedMul, poseHooks, drawStaff(), staffOil (the tip's look).
    Monsters take a burn tick as a hit of kind 'burn' (monsters.js decides what that does).
-   Events: oils:change · oil:apply · oil:on · oil:off · oil:ignite · oil:burn · oil:burst · oil:slow
+   Events: oils:change · oil:apply · oil:on · oil:off · oil:ignite · oil:burn · oil:burst · oil:slow · oil:fixed
    Persist key 'oils'. Spec: OILS.md
    ===================================================================== */
 (function(){
@@ -65,6 +67,10 @@ function take(id,n=1){ if((S.n[id]|0)<n)return false; S.n[id]-=n; if(S.n[id]<=0)
 function list(){ return Object.keys(OILS).filter(id=>(S.n[id]|0)>0).map(id=>({id,n:S.n[id],name:OILS[id].name})); }
 function has(id){ return !!(S.active&&S.active.id===id)||S.fixed===id; }
 function strength(id){ return S.active&&S.active.id===id?'coat':S.fixed===id?'fixed':0; }
+
+/* the fixed oil: one at a time, no timer, the gentler numbers (the cost is charged by progression.js, not here) */
+function fix(id){ if(!known(id))return false; const prev=S.fixed; S.fixed=id; chipKey=''; G.emit('oil:fixed',{id,prev}); return true; }
+function unfix(){ const prev=S.fixed; if(!prev)return false; S.fixed=null; chipKey=''; G.emit('oil:fixed',{id:null,prev}); return true; }
 
 /* ---------- dressing the staff ---------- */
 function apply(id,fromInput){
@@ -269,7 +275,7 @@ const look={color:'#e3a13a',k:0,flame:false}; let lookOn=false;
 function updateLook(){
   const p=P(); if(!p)return;
   let id=null, k=0;
-  if(dressT>=0){ id=dressId; k=smooth(.1,N.dress,dressT); }
+  if(dressT>=0){ id=dressId; k=smooth(.1,N.dress,dressT); if(S.fixed&&S.fixed!==id&&k<N.fixedK)id=S.fixed, k=N.fixedK; }   // the fixed oil's faint tint holds until the new coat outshines it
   else if(S.active){ id=S.active.id; k=1; if(S.active.left<8)k=.55+.45*(.5+.5*Math.cos(G.time*(S.active.left<3?14:7))); } // gutters near the end
   if(!id&&S.fixed){ id=S.fixed; k=N.fixedK; }
   if(!id){ if(lookOn){ lookOn=false; p.staffOil=null; } return; }
@@ -277,23 +283,28 @@ function updateLook(){
 }
 
 /* ---------- HUD: the coat chip (oil name and time left) and the flask count by the draught ---------- */
-let chip=null, chipTxt=null, chipKey='', flaskEl=null, flaskN=null, flaskKey='';
+let chip=null, chipTxt=null, chipKey='', flaskEl=null, flaskN=null, flaskKey='', fxEl=null;
 const CHIP_CSS=`
 .oil-chip{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--bone,#f1e9d8);text-shadow:0 1px 3px #000;white-space:nowrap;transition:opacity .4s;opacity:0}
 .oil-chip.show{opacity:1}
 .oil-chip svg{width:12px;height:16px;flex:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
 .oil-chip b{font-weight:700;font-variant-numeric:tabular-nums}
 .oil-chip.low b{animation:oilLow .8s ease-in-out infinite alternate}
+.oil-chip .fx{display:none;align-items:center;gap:4px;font:600 11.5px var(--body);letter-spacing:.04em;opacity:.85}
+.oil-chip .fx.on{display:inline-flex}
+.oil-chip .fx svg{width:11px;height:11px}
+.oil-chip .fx.solo+.ic:empty+.txt:empty{display:none}
 @keyframes oilLow{to{opacity:.4}}
 .oil-flasks{display:inline-flex;align-items:center;gap:3px;font:700 14px var(--body);color:var(--bone);text-shadow:0 1px 3px #000;font-variant-numeric:tabular-nums}
 .oil-flasks[hidden]{display:none}
 .oil-flasks svg{width:13px;height:20px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))}`;
+const FIXED_SVG=c=>`<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 .8 11.2 6 6 11.2.8 6z" fill="${c}" stroke="#f1e3cf" stroke-width="1"/><circle cx="6" cy="6" r="1.4" fill="#1a110c" opacity=".55"/></svg>`;
 const FLASK_SVG=c=>`<svg viewBox="0 0 13 20" aria-hidden="true"><path d="M4.6 1.2h3.8v2h-.4v3.6l3.3 9.4a1.6 1.6 0 0 1-1.5 2.2H3.2a1.6 1.6 0 0 1-1.5-2.2L5 6.8V3.2h-.4z" fill="rgba(255,236,214,.2)" stroke="#f1e3cf" stroke-width="1" stroke-linejoin="round"/><path d="M3.1 12.4h6.8l1.6 4.2a.9.9 0 0 1-.8 1.2H2.3a.9.9 0 0 1-.8-1.2z" fill="${c}"/><rect x="4.9" y=".4" width="3.2" height="1.8" rx=".5" fill="#7a5638"/></svg>`;
 function buildHud(){
   const host=document.querySelector('#hud .vitals'); if(!host)return false;
   const st=document.createElement('style'); st.textContent=CHIP_CSS; document.head.appendChild(st);
   chip=document.createElement('div'); chip.className='oil-chip'; chip.hidden=true; chip.setAttribute('aria-live','off');
-  chip.innerHTML='<span class="ic"></span><span class="txt"></span>'; chipTxt=chip.querySelector('.txt');
+  chip.innerHTML='<span class="fx" id="oilFixed"></span><span class="ic"></span><span class="txt"></span>'; chipTxt=chip.querySelector('.txt'); fxEl=chip.querySelector('.fx');
   host.appendChild(chip);
   flaskEl=document.createElement('div'); flaskEl.className='oil-flasks'; flaskEl.id='oilFlasks'; flaskEl.hidden=true; flaskEl.setAttribute('role','status');
   flaskEl.innerHTML='<span class="ic"></span><span class="on">0</span>'; flaskN=flaskEl.querySelector('.on');
@@ -304,16 +315,19 @@ function buildHud(){
 const mmss=s=>{s=Math.ceil(s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 function updateHud(){
   if(!chip&&!buildHud())return;
-  // the coat
-  const a=S.active, dressing=dressT>=0;
-  const show=!!a||dressing;
+  // the coat, and the fixed oil's small mark in front of it (shown on its own when no coat is on)
+  const a=S.active, dressing=dressT>=0, fx=S.fixed&&OILS[S.fixed];
+  const coat=!!a||dressing, show=coat||!!fx;
   if(chip.hidden===show){ chip.hidden=!show; if(show)requestAnimationFrame(()=>chip.classList.add('show')); else chip.classList.remove('show'); }
   if(show){
-    const o=OILS[dressing?dressId:a.id], k=dressing?o.id+'|d':o.id+'|'+Math.ceil(a.left);
+    const o=coat&&OILS[dressing?dressId:a.id], k=(fx?fx.id:'')+'#'+(!o?'':dressing?o.id+'|d':o.id+'|'+Math.ceil(a.left));
     if(k!==chipKey){ chipKey=k;
-      chip.querySelector('.ic').innerHTML=FLASK_SVG(o.color);
-      chipTxt.innerHTML=`<span style="color:${o.color}">${o.name}</span> <b style="color:${o.color}">${dressing?'…':mmss(a.left)}</b>`;
-      chip.classList.toggle('low',!dressing&&a.left<=10); }
+      fxEl.className='fx'+(fx?' on':'')+(fx&&!o?' solo':'');
+      fxEl.innerHTML=fx?FIXED_SVG(fx.color)+(o?'':`<span style="color:${fx.color}">${fx.name.replace(/ Oil$/,'')}</span>`):'';
+      fxEl.title=fx?'Fixed in the staff: '+fx.name:''; fxEl.setAttribute('aria-label',fxEl.title);
+      chip.querySelector('.ic').innerHTML=o?FLASK_SVG(o.color):'';
+      chipTxt.innerHTML=o?`<span style="color:${o.color}">${o.name}</span> <b style="color:${o.color}">${dressing?'…':mmss(a.left)}</b>`:'';
+      chip.classList.toggle('low',!!o&&!dressing&&a.left<=10); }
   }
   // the flasks
   const t=total(), l=list(), c=l.length?OILS[l[0].id].color:'#e3a13a', fk=t+'|'+c;
@@ -379,8 +393,7 @@ G.oils={
   get fixed(){ return S.fixed; },
   get dressing(){ return dressT>=0; },
   apply:id=>apply(id,false), clear, has, strength,
-  fix(id){ if(!known(id))return false; const prev=S.fixed; S.fixed=id; G.emit('oil:fixed',{id,prev}); return true; },   // fuller rules come later
-  unfix(){ const prev=S.fixed; S.fixed=null; if(prev)G.emit('oil:fixed',{id:null,prev}); },
+  fix, unfix,
   burning:t=>!!t&&(burns.has(t)||burns.has(keyOf(t))),
   slowed,
   openPicker, closePicker,
