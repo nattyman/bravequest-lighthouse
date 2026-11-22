@@ -44,7 +44,8 @@ function partMesh(p){
   if(p.id==='sail'){ const m=new THREE.Mesh(new THREE.BoxGeometry(1.1,.32,.8),canvas); m.position.y=.16; m.castShadow=true; g.add(m); G.outline&&G.outline(m,{thickness:.02});
     const pa=new THREE.Mesh(new THREE.PlaneGeometry(.36,.28),patch); pa.rotation.x=-PI/2; pa.position.set(.2,.33,.1); g.add(pa);
     const tie=new THREE.Mesh(new THREE.TorusGeometry(.42,.02,4,16),rope); tie.rotation.y=PI/2; tie.scale.set(1,.45,1); tie.position.y=.16; g.add(tie); }
-  if(p.id==='pitch'){ const pot=new THREE.Mesh(new THREE.CylinderGeometry(.32,.26,.5,10),iron); pot.position.y=.25; pot.castShadow=true; g.add(pot); G.outline&&G.outline(pot,{thickness:.02});
+  // with forage.js loaded the kiln and its pot are a permanent place there: the part then draws nothing of its own
+  if(p.id==='pitch'&&!(G.forage&&G.forage.kiln)){ const pot=new THREE.Mesh(new THREE.CylinderGeometry(.32,.26,.5,10),iron); pot.position.y=.25; pot.castShadow=true; g.add(pot); G.outline&&G.outline(pot,{thickness:.02});
     const tar=new THREE.Mesh(new THREE.CircleGeometry(.29,10),G.toon('#0e0b0c')); tar.rotation.x=-PI/2; tar.position.y=.49; g.add(tar);
     const kiln=new THREE.Mesh(new THREE.ConeGeometry(1.1,1.3,9,1,true),G.toon('#857a70',{side:THREE.DoubleSide})); kiln.scale.setScalar(1.3); kiln.position.set(-1.8,.85,.4); g.add(kiln); }
   G.scene.add(g); g.visible=false; return g;

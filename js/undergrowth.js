@@ -10,7 +10,9 @@
    distance to G.focus (complementary screen-door dither, shadows too), so plants change one by one and smoothly; a
    tile's contents only change for plants whose levels are fully one way, and a rebuild copies the plants it keeps.
    Quality: saver = lowest detail everywhere, fewer ferns, no shadows; balanced and high: see Q.
-   API: G.undergrowth = { build(ctx), kinds:{name:[geo0,geo1,geo2]}, update(force), stats, debug }
+   API: G.undergrowth = { build(ctx), kinds:{name:[geo0,geo1,geo2]}, plants(kind?), update(force), stats, debug }
+   clearings: [{x,z,r}] other modules push at load time (before the world builds) to keep plants out of a small place.
+   plants(kind) is the read-only list of placed plants ({kind,grp,x,y,z,q,s}), optionally one kind; [] before the build.
    ===================================================================== */
 (function(){
 'use strict';
@@ -27,7 +29,7 @@ const Q={saver:{skip:.35,cast:false},
 const KEEP=1.75, SLACK=.75, PER_FRAME=2;                  // levels kept for +-KEEP m of focus travel; refresh SLACK m before
 const UGU={f:{value:G.focus},fern:{value:new THREE.Vector4(-1e4,1,-1e4,1)},bush:{value:new THREE.Vector4(-1e4,1,-1e4,1)}};
 const KS={shrub:1.35,holly:1.25,bramble:1.3,gorse:1.7,heather:2.0,fern:1.2,bracken:1.15}; // model size -> the old plants' bulk
-const UG=G.undergrowth={kinds:{},build,update,add,stats:{bytes:0,ms:0,tris:0,draws:0,instances:0,byKind:{}},debug:{}};
+const UG=G.undergrowth={kinds:{},clearings:[],build,update,add,plants,stats:{bytes:0,ms:0,tris:0,draws:0,instances:0,byKind:{}},debug:{}};
 
 /* ---------- decode ---------- */
 function b64(s,T){ const bin=atob(s), u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i); return new T(u8.buffer); }
@@ -96,6 +98,7 @@ function gather(tl,grp,hollow,out){
   for(const [key,items] of tl.t)for(const [m,c] of items){
     const x=m.elements[12], z=m.elements[14];
     if(hollow&&Math.hypot(x-hollow.x,z-hollow.z)<hollow.r)continue;
+    if(UG.clearings.length&&UG.clearings.some(c=>Math.hypot(x-c.x,z-c.z)<c.r))continue;
     m.decompose(_p,_q,_s); const lum=c?(c.r+c.g+c.b)/3:1; sum+=lum; cnt++;
     raw.push({key,x,z,q:_q.clone(),s:_s.clone(),c:c?c.clone():null,lum,m}); }
   const mean=cnt?sum/cnt:1;
@@ -133,6 +136,11 @@ function build(ctx){
   G.on('quality',()=>update(true));
   UG.stats.ms=Math.round(performance.now()-t0);
 }
+
+/* ---------- the placed plants, for other modules (forage.js picks its gorse from these): copies, so callers can't move them */
+function plants(kind){ const L=UG.debug.list||[]; const out=[];
+  for(const o of L){ if(kind&&o.kind!==kind)continue; out.push({kind:o.kind,grp:o.grp,x:o.x,y:o.y,z:o.z,q:o.q.clone(),s:o.s.clone()}); }
+  return out; }
 
 /* ---------- extra placements from elsewhere (the cottage garden): [{x,y,z,kind,h?}] -> one more tile, no colliders ---------- */
 const GARDEN_H={shrub:.86,heather:.6};
