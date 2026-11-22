@@ -232,6 +232,7 @@ const BIND={
   jump:['Space'], sprint:['ShiftLeft','ShiftRight'], roll:['KeyC','ControlLeft','AltLeft'],
   attack:['KeyJ','mouse0'], lock:['KeyQ','Tab','mouse2'], interact:['KeyE'], shutter:['KeyF'], potion:['KeyH'], pause:['Escape','KeyP'],
   advance:['Enter','NumpadEnter'], log:['KeyL'], // L: straight to the message log (playtest 2026-11-07; the controller's View button stays on the map, map.js) // next caption (hud.js); Enter on a focused menu button only clicks that button (see keydown)
+  oil:['KeyV'], // dress the staff with an oil (oils.js). Also: hold the draught action (H, D-pad up, the bottle button), see OIL HOOK
   glass:['KeyG'], // hold: raise the Remembering Glass (glass.js; the Undercroft). Controller: hold Y (see pollPad)
   fox:['KeyR'], raven:['KeyT'] // companions.js: Ember go / heel, Corvin go / scout (controller: D-pad left / right)
 };
@@ -490,6 +491,18 @@ function shutterHold(dt){
   if(shHold.on)released.add('lens'); else pressed.add('shutter');
   shHold.t=-1; shHold.on=false;
 }
+/* OIL HOOK (oils.js): while a flask of staff oil is on the belt (G.oils.armed()), the draught action (H, controller D-pad up,
+   the bottle button) waits for its release: let go within .3 s and it is the drink it always was (sent on release); held .3 s
+   it becomes the 'oil' action (pressed once). Otherwise the draught acts the moment it is pressed, as it always has. */
+const oilHold={t:-1,on:false};
+function potionHold(dt){
+  const hit=pressed.has('potion')||vpressed.has('potion');
+  if(oilHold.t<0){ if(!hit||!(G.oils&&G.oils.armed&&G.oils.armed()))return; oilHold.t=0; }
+  pressed.delete('potion'); vpressed.delete('potion');
+  if(G.input.down('potion')){ oilHold.t+=dt; if(oilHold.t>=.3&&!oilHold.on){ oilHold.on=true; pressed.add('oil'); } return; }
+  if(!oilHold.on)pressed.add('potion');
+  oilHold.t=-1; oilHold.on=false;
+}
 G.input={
   BIND,
   /** held this frame ('lens': the shutter held past .3 s with the Vigil Lens, see LENS HOOK) */
@@ -519,7 +532,7 @@ G.input={
     return true;
   },
   /** called by the frame loop / G.step before systems update */
-  poll(dt){ pollPad(dt||0); shutterHold(dt||0); },
+  poll(dt){ pollPad(dt||0); shutterHold(dt||0); potionHold(dt||0); },
   /** mouse / touch / right-stick look in pixels since last frame (+y = look down unless inverted).
       Invert is applied here, once, so every source respects G.settings.invertY. */
   look(){ return {x:lookX,y:G.settings.invertY?-lookY:lookY}; },
@@ -649,7 +662,8 @@ const _v=new THREE.Vector3();
 G.combat={
   add(hb){G.hurtboxes.add(hb);return hb;},
   remove(hb){G.hurtboxes.delete(hb);},
-  /** sphere strike against opposing hurtboxes. o={x,y,z,radius,team,damage,knockback,kind,source,exclude:Set} -> hit list */
+  /** sphere strike against opposing hurtboxes. o={x,y,z,radius,team,damage,knockback,kind,source,element,exclude:Set} -> hit list
+      (element: what the blow is made of, e.g. 'fire'; passed to hit(info) and the 'strike' event, null for a plain blow) */
   strike(o){
     const hits=[];
     for(const hb of G.hurtboxes){
@@ -660,12 +674,12 @@ G.combat={
       const dx=o.x-hb.pos.x,dy=o.y-cy,dz=o.z-hb.pos.z;
       if(dx*dx+dy*dy+dz*dz>(o.radius+hb.radius)**2)continue;
       _v.set(hb.pos.x-o.x,0,hb.pos.z-o.z); if(_v.lengthSq()<1e-6)_v.set(0,0,1); _v.normalize();
-      const info={damage:o.damage||1,dir:_v.clone(),knockback:o.knockback==null?5:o.knockback,kind:o.kind||'melee',source:o.source||null};
+      const info={damage:o.damage||1,dir:_v.clone(),knockback:o.knockback==null?5:o.knockback,kind:o.kind||'melee',source:o.source||null,element:o.element||null};
       try{hb.hit(info);}catch(e){console.error(e);}
       if(o.exclude)o.exclude.add(hb);
       hits.push(hb);
     }
-    if(hits.length)G.emit('strike',{hits,team:o.team,kind:o.kind});
+    if(hits.length)G.emit('strike',{hits,team:o.team,kind:o.kind||'melee',element:o.element||null,source:o.source||null,x:o.x,y:o.y,z:o.z,radius:o.radius});
     return hits;
   },
   /** best lock-on candidate in front of `from` facing `dir` (Vector3); prio: a hurtbox flagged lockPriority wins wherever it is */
@@ -688,10 +702,10 @@ function updateProjectiles(dt){
     const p=P[i]; p.life-=dt; p.pos.addScaledVector(p.vel,dt);
     if(p.gravity)p.vel.y-=p.gravity*dt;
     if(p.mesh){p.mesh.position.copy(p.pos); if(p.spin)p.mesh.rotation.y+=dt*p.spin;}
-    const hits=G.combat.strike({x:p.pos.x,y:p.pos.y,z:p.pos.z,radius:p.radius||.4,team:p.team,damage:p.damage,knockback:p.knockback,kind:p.kind||'bolt',source:p,exclude:p.exclude});
+    const hits=G.combat.strike({x:p.pos.x,y:p.pos.y,z:p.pos.z,radius:p.radius||.4,team:p.team,damage:p.damage,knockback:p.knockback,kind:p.kind||'bolt',source:p,element:p.element,exclude:p.exclude});
     let end=p.life<=0||p.pos.y<G.floorAt(p.pos.x,p.pos.z,p.pos.y+1)-.05;
     if(hits.length){ if(p.onHit)hits.forEach(h=>p.onHit(h)); if(!p.pierce)end=true; }
-    if(end){ if(p.mesh)scene.remove(p.mesh); if(p.onEnd)p.onEnd(p); P.splice(i,1); }
+    if(end){ if(p.mesh)scene.remove(p.mesh); if(p.onEnd)p.onEnd(p); P.splice(i,1); G.emit('projectile:end',{p,hits}); }
   }
 }
 
