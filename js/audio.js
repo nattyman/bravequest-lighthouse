@@ -1577,6 +1577,78 @@ const tpAPI={ get active(){return tp.inside;}, get mix(){return +tp.k.toFixed(3)
   /** play any Vigil sound by its reserved name (recorded if present, synth otherwise) */
   play(name,pos){ return !!tfx(name,pos?new THREE.Vector3(pos.x,pos.y+1.5,pos.z):null,{ref:8}); } };
 
+/* =====================================================================
+   STAFF OILS AND FORAGE (oils.js, forage.js) — small, dry synth placeholders, driven only by their events. Spec: OILS.md.
+   Kept low and short on purpose: a coat is on through whole fights, so nothing here may sit on top of the combat sounds,
+   and none of it is a sweep or a whoosh: a cork, a rag on wood, a catch, a crackle, a sputter, a twig, a scraper.
+   Recorded files: none yet, so nothing is fetched. Reserved names for when they exist (add each to SFX_LIST and to OIL_REC):
+     oil_apply (dressing the staff), oil_ignite (a struck monster catching), oil_end (the coat running out),
+     forage_pick (picking gorse and the like), kiln_scrape (scraping pitch off the kiln).
+   ===================================================================== */
+const OIL_REC={};   // synth name -> recorded stem, e.g. dress:'oil_apply' — empty until the files exist
+const ol={log:[],burnT:-9,igniteT:-9,lastBurn:new WeakMap(),lastIgnite:new WeakMap()};
+/* -- synth placeholders: (t, out, o) -- */
+function crackle(t,out,n,g,spread){ for(let i=0;i<n;i++){ const tt=t+Math.random()*spread, d=rnd(.006,.022);
+  noise(tt,d,filt('bandpass',rnd(1600,5200),rnd(2,4.5),envGain(out,tt,.001,g*rnd(.45,1),0,d))); } }
+const OS={
+  // uncork, then three short strokes of an oily rag along the staff (the dressing takes about 1.2 s)
+  dress(t,out){ const c=osc('sine',900,t,t+.06,envGain(out,t,.001,.05,0,.035)); c.frequency.exponentialRampToValueAtTime(320,t+.03);
+    noise(t,.012,filt('highpass',2500,.7,envGain(out,t,.001,.05,0,.012)));
+    [.26,.56,.84].forEach((dt,i)=>{ const tt=t+dt, f=rnd(560,820);
+      noise(tt,.28,filt('bandpass',f,1.3,envGain(out,tt,.05,.045-i*.006,.07,.12)),true);
+      noise(tt+.2,.02,filt('bandpass',2400,3,envGain(out,tt+.2,.001,.015,0,.02))); }); },   // a faint tack as the rag lifts
+  // the coat catches: a soft low knock and a brief scatter of crackle
+  on(t,out){ S.thud(t,{dest:out,g:.1,f0:170,f1:70,dur:.12,click:.25,nf:1400}); crackle(t+.02,out,6,.05,.25);
+    const g=envGain(out,t,.01,.012,.05,.3); osc('triangle',98,t,t+.45,filt('lowpass',400,1,g)); },
+  // a struck monster catches: one dry crack, a very short flare (no sweep), a few crackles
+  ignite(t,out){ noise(t,.03,filt('highpass',1800,.7,envGain(out,t,.001,.09,0,.03)));
+    noise(t+.01,.18,filt('bandpass',950,.8,envGain(out,t+.01,.01,.045,0,.15)),true); crackle(t+.03,out,6,.05,.3); },
+  // one burn tick: a couple of grains and a muffled pop
+  burn(t,out){ crackle(t,out,2+(Math.random()<.5?1:0),.03,.12); noise(t,.02,filt('lowpass',600,.7,envGain(out,t,.002,.03,0,.03)),true); },
+  // the coat runs out: a sputter that thins, a dull tick as it goes
+  off(t,out){ [[0,.04],[.08,.03],[.19,.02],[.33,.012]].forEach(([dt,g])=>crackle(t+dt,out,2,g,.04));
+    const s=osc('sine',220,t+.36,t+.48,envGain(out,t+.36,.002,.022,0,.08)); s.frequency.exponentialRampToValueAtTime(160,t+.44);
+    noise(t+.36,.12,filt('lowpass',900,.7,envGain(out,t+.36,.01,.02,0,.1))); },
+  // a sprig snapped off a bush: two twig cracks and a short rustle
+  pick(t,out){ noise(t,.012,filt('bandpass',3200,3,envGain(out,t,.001,.08,0,.012))); noise(t+.03,.008,filt('bandpass',2600,3,envGain(out,t+.03,.001,.05,0,.01)));
+    noise(t+.01,.15,filt('bandpass',2200,.7,envGain(out,t+.01,.02,.03,0,.12))); },
+  // pitch scraped off the kiln floor: two gritty strokes with a scraper, then a dull knock of the pot
+  scrape(t,out){ for(const [dt,f0,f1] of [[0,1100,1700],[.3,1300,1900]]){ const tt=t+dt, g=envGain(out,tt,.02,.05,.14,.06);
+      for(let k=1;k<7;k++)g.gain.setValueAtTime(.05*rnd(.45,1),tt+.02+k*.022);   // the grit: the blade catches and slips
+      const b=filt('bandpass',f0,2.5,g); b.frequency.setValueAtTime(f0,tt); b.frequency.linearRampToValueAtTime(f1,tt+.22); noise(tt,.25,b); }
+    const k=osc('sine',185,t+.6,t+.72,filt('lowpass',500,1,envGain(out,t+.6,.002,.06,0,.09))); k.frequency.exponentialRampToValueAtTime(140,t+.68); }
+};
+/** play an oil / forage sound: the recorded file if one is mapped and loaded, else the synth placeholder */
+function ofx(name,pos,o={}){
+  if(!ctx)return null; ol.log.push(name); if(ol.log.length>60)ol.log.shift();
+  const rec=OIL_REC[name]; if(rec&&hasSfx(rec)){ const h=playSfx(rec,{pos,ref:o.ref||4,gain:o.gain==null?.8:o.gain}); if(h)return h; }
+  const fn=OS[name]; if(!fn)return null;
+  fn(ctx.currentTime+(o.delay||0),o.dest||(pos?at(pos,o.ref||4):sfxBus),o.arg||{}); return true;
+}
+const oilAt=e=>{ const p=V3(e&&e.pos); if(p){ p.y+=1; return p; } return null; };
+const oilKey=e=>(e&&e.target)||null;
+function wireOils(){
+  const now=()=>ctx.currentTime;
+  G.on('oil:apply',e=>{ if(!ctx||(e&&e.restored))return; ofx('dress',pNear(1.1),{ref:3}); });
+  G.on('oil:on',e=>{ if(!ctx||(e&&e.restored))return; ofx('on',pNear(1.4),{ref:3}); });
+  G.on('oil:off',e=>{ if(!ctx||!e||e.restored)return;
+    if(/^(replace|replaced|load|reset|clear|debug)$/.test(String(e.reason||'')))return;   // a new coat or a reload is not the coat running out
+    ofx('off',pNear(1.4),{ref:3}); });
+  G.on('oil:ignite',e=>{ if(!ctx)return; const t=now(), k=oilKey(e);
+    if(t-ol.igniteT<.12)return; ol.igniteT=t; if(k&&typeof k==='object')ol.lastIgnite.set(k,t);
+    ofx('ignite',oilAt(e)||pNear(1)); });
+  // burn ticks: never more than one every .3 s overall, one a second per target, none right on top of that target's ignite
+  G.on('oil:burn',e=>{ if(!ctx)return; const t=now(), k=oilKey(e);
+    if(t-ol.burnT<.3)return;
+    if(k&&typeof k==='object'){ if(t-(ol.lastBurn.get(k)||-9)<.8||t-(ol.lastIgnite.get(k)||-9)<.35)return; ol.lastBurn.set(k,t); }
+    ol.burnT=t; ofx('burn',oilAt(e)||pNear(1),{ref:3}); });
+  G.on('forage:pick',e=>{ if(!ctx||!e)return; const p=V3(e.pos)||pNear(.6);
+    ofx(e.item==='pitch'?'scrape':'pick',p,{ref:3}); });
+}
+const oilAPI={ get log(){return ol.log.slice();}, synth:OS, rec:OIL_REC,
+  /** play an oil / forage sound by its synth name (dress, on, ignite, burn, off, pick, scrape) */
+  play(name,pos){ return !!ofx(name,pos?new THREE.Vector3(pos.x,pos.y+1,pos.z):null); } };
+
 /* ---------- pause-menu controls ---------- */
 let volEl=null, musEl=null, muteEl=null;
 function syncUI(){ if(volEl){volEl.value=Math.round(settings.volume*100);musEl.value=Math.round(settings.music*100);muteEl.checked=settings.muted;} }
@@ -1618,8 +1690,9 @@ G.audio={settings,get ready(){return !!ctx;},get context(){return ctx;},get outp
 G.audio.cave=caveAPI;
 G.audio.undercroft=ucAPI;
 G.audio.temple=tpAPI;
+G.audio.oils=oilAPI;
 G.system('audio',{order:92,modes:'always',
-  init(){ wire(); wireCave(); wireUndercroft(); wireTemple(); buildUI(); },
+  init(){ wire(); wireCave(); wireUndercroft(); wireTemple(); wireOils(); buildUI(); },
   update(dt){
     if(!ctx||ctx.state!=='running')return;
     const mode=G.state.mode;

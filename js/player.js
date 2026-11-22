@@ -183,6 +183,19 @@ G.models.staff=function(){
     halo.scale.setScalar(.9*(.7+.4*k)); halo.material.opacity=Math.min(.8,.25*k);
     crystal.rotation.y=t*(1+k);
   };
+  /* a staff oil (oils.js) tints the tip: o={color, k 0..1 (how strongly), flame:bool} or null. Runs after setGlow each frame. */
+  const flame=sprite(G.tex.flame,'#ffb04a',.2,.9); flame.position.y=.07; flame.visible=false; top.add(flame);
+  const oilC=new THREE.Color(), oilHot=new THREE.Color(), baseGlow=col('#a070ff'), baseHalo=col('#7a4cff'), pale=col('#fff0c0'); let oilHex='';
+  ud.setOil=(o,t=0)=>{
+    const k=o?U.clamp(o.k==null?1:o.k,0,1):0;
+    flame.visible=!!(o&&o.flame&&k>.05);
+    if(k<=0){ glow.material.color.copy(baseGlow); halo.material.color.copy(baseHalo); return; }
+    if(o.color!==oilHex){ oilHex=o.color; oilC.copy(col(oilHex)); oilHot.copy(oilC).multiplyScalar(2.4); }
+    crystalMat.color.lerp(oilHot,k*.85);
+    glow.material.color.copy(baseGlow).lerp(oilC,k); halo.material.color.copy(baseHalo).lerp(oilC,k*.8);
+    if(flame.visible){ const f=(.8+.2*Math.sin(t*23)+.12*Math.sin(t*37+1))*(.6+.4*k);
+      flame.scale.set(.15*f,.24*f,1); flame.material.opacity=.85*k; flame.material.color.copy(oilC).lerp(pale,.25); }
+  };
   ud.setGlow(1);
   if(!/[?&]nomerge/.test(location.search))mergeStatic(S,ud);
   return S;
@@ -504,7 +517,7 @@ function mergeStatic(root,R){
    --------------------------------------------------------------------- */
 const P=G.player; // mutate the core stub in place (other modules may hold a reference)
 const L=G.items.lantern, ST=G.items.staff;
-let R=null, lanternObj=null, staffObj=null, reticle=null;
+let R=null, lanternObj=null, staffObj=null, reticle=null, oilShown=false;
 const tmp=new V3(), tmp2=new V3(), tmp3=new V3(), up=new V3(0,1,0);
 const hv=new V3();            // horizontal velocity
 let vy=0, coyote=0, jumpBuf=0, airT=0, fallTop=0, jumpHeld=false, wasGliding=false, glideT=0, glideV0=0, glideSink=4;
@@ -558,6 +571,7 @@ Object.assign(P,{
   lockTarget:null,gliding:false,sprinting:false,inputEnabled:true,model:null,heading:START.yaw,camYaw:START.yaw,
   hands:{left:null,right:null},
   actionLock:0,speedMul:1,poseHooks:[], // hooks for other modules' actions (potions.js)
+  staffOil:null, // the staff's oil look, set by oils.js: {color, k, flame} or null
   hurtFilters:[], // fn(damage, info) -> new damage (or null to leave it): runs after i-frames, before the blow lands
   // upgrade multipliers (progression.js sets them): dmg +half-hearts per staff hit/bolt, cost x technique/roll stamina, stamMax x stamina pool,
   // charge x bolt charge rate, boltSpeed x, pierce extra bolt targets. camPull {yaw,pitch,dist,rate}: the camera eases to it (reward moment)
@@ -659,6 +673,9 @@ P.GLIDE=GLIDE; // glide tuning (tests, docs)
 Object.defineProperty(P,'sitting',{configurable:true,get(){ return !!sitting; }});
 /** put the staff on the back (another module needs the right hand, e.g. to drink) */
 P.sheathe=function(){ if(staffDrawn)sheathe(); };
+/** take the staff in hand (another module's action uses it, e.g. dressing it with an oil); false without the staff */
+P.drawStaff=function(){ if(!ST.owned||!staffObj)return false; drawStaff(); return true; };
+P.staffTip=out=>staffTip(out||new V3());
 G.on('cloak:found',()=>{ if(CK.t<0&&CK.worn&&CK.done)return; CK.done=true; equipFlourish(); });
 
 function checkpointPos(){
@@ -1782,7 +1799,8 @@ function placeModel(){
   R.root.rotation.y=P.heading;
   R.root.updateMatrixWorld(true);
   updateCloak(G.dt||1/60);
-  if(staffObj)staffObj.userData.setGlow(charge.on?1+Math.min(2.4,charge.t*2.4)+(charge.ready>=2?.6:0):staffDrawn?1:.7,G.time);
+  if(staffObj){ staffObj.userData.setGlow(charge.on?1+Math.min(2.4,charge.t*2.4)+(charge.ready>=2?.6:0):staffDrawn?1:.7,G.time);
+    if(staffObj.userData.setOil&&(P.staffOil||oilShown)){ oilShown=!!P.staffOil; staffObj.userData.setOil(P.staffOil,G.time); } }
   const mm=mv.id&&MT()?MT()[mv.id]:null;
   const moveEmit=!!mm&&(mm.act?mv.t>=mm.act[0]-.02&&mv.t<=mm.act[1]+.06:mv.id==='spin'?mv.t<mm.dur*.9:mv.phase==='fall'||mv.phase==='drop'||mv.phase==='impact'&&mv.t<.08);
   const swingEmit=atk.on&&atk.phase!=='wind'&&atk.t<SW[atk.i].wind+SW[atk.i].act+.06||spinT>.04&&spinT<.45||moveEmit;

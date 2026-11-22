@@ -20,15 +20,20 @@ const looping=()=>!!(G.loop&&G.loop.active);
 /* =====================================================================
    1. SATCHEL — G.inv
    ===================================================================== */
+/* one row per item: name, plural, desc, icon (16×16 svg). Order here is the order in the HUD strip and the panel chips;
+   chip:'always' shows the chip at zero, chip:false keeps it out of the chips (vials have their own line). The HUD strip
+   shows any item only while one is held. New items go above 'vial'. */
 const ITEMS={
-  glowcap:{name:'Glowcap',plural:'Glowcaps',desc:'A violet mushroom that glows the colour of the lamp. Weak, but common.'},
-  kelp:{name:'Glowkelp',plural:'Glowkelp',desc:'Bioluminescent kelp, only uncovered at low tide.'},
-  brine:{name:'Brine Crystal',plural:'Brine Crystals',desc:'Pale salt that grows on the wet sand when the sea draws back.'},
-  pearl:{name:'Tide Pearl',plural:'Tide Pearls',desc:'The pearl-organ of something washed up. Rare.'},
-  ichor:{name:'Ichor',plural:'Ichor',desc:'Black and glossy. What is left of a corrupted thing. It is still warm.'},
-  vial:{name:'Ether Vial',plural:'Ether Vials',desc:'Refined ether, ready for the lamp.'}
+  glowcap:{name:'Glowcap',plural:'Glowcaps',desc:'A violet mushroom that glows the colour of the lamp. Weak, but common.',chip:'always',icon:'<svg viewBox="0 0 16 16"><path d="M2.2 8.6C2.6 4.6 5 2.6 8 2.6s5.4 2 5.8 6c-1.6.7-3.6 1-5.8 1s-4.2-.3-5.8-1z" fill="#a46cff"/><path d="M6.6 9.4h2.8l.5 4.4H6.1z" fill="#e6dcef"/><circle cx="6" cy="6" r=".9" fill="#e6d6ff"/><circle cx="9.6" cy="5" r=".7" fill="#e6d6ff"/></svg>'},
+  kelp:{name:'Glowkelp',plural:'Glowkelp',desc:'Bioluminescent kelp, only uncovered at low tide.',icon:'<svg viewBox="0 0 16 16" fill="none" stroke="#56e2d2" stroke-width="1.6" stroke-linecap="round"><path d="M4 14c-1-3 2-5 0-8s1-4 1-4"/><path d="M8.5 14c1-3-2-5 0-8s0-4 0-4"/><path d="M12.5 14c-1-2.5 1.8-4.2.2-6.6"/></svg>'},
+  brine:{name:'Brine Crystal',plural:'Brine Crystals',desc:'Pale salt that grows on the wet sand when the sea draws back.',icon:'<svg viewBox="0 0 16 16"><path d="M7 1.6l2.6 4.6L7 14 4.4 6.2z" fill="#e8f0f8" stroke="#8ea4c4" stroke-width=".8"/><path d="M11.6 6l1.8 3-1.8 4.6-1.8-4.6z" fill="#d4e2f2" stroke="#8ea4c4" stroke-width=".7"/></svg>'},
+  pearl:{name:'Tide Pearl',plural:'Tide Pearls',desc:'The pearl-organ of something washed up. Rare.',icon:'<svg viewBox="0 0 16 16"><circle cx="8" cy="8.4" r="5" fill="#f4e4ee" stroke="#b49aac" stroke-width=".8"/><circle cx="6.4" cy="6.6" r="1.5" fill="#fff"/></svg>'},
+  ichor:{name:'Ichor',plural:'Ichor',desc:'Black and glossy. What is left of a corrupted thing. It is still warm.',icon:'<svg viewBox="0 0 16 16"><path d="M8 1.6C10 5 12.4 7.6 12.4 10.2A4.4 4.4 0 0 1 3.6 10.2C3.6 7.6 6 5 8 1.6z" fill="#0c0910" stroke="#9a6cff" stroke-width="1"/><path d="M6 9.6c.2-1.2.8-2 1.4-2.6" stroke="#d6bcff" stroke-width=".9" fill="none" stroke-linecap="round"/></svg>'},
+  pitch:{name:'Kiln Pitch',plural:'Kiln Pitch',desc:'Black pitch scraped warm off the old kiln floor. It smells of smoke and resin.',icon:'<svg viewBox="0 0 16 16"><path d="M3.4 6h9.2l-.9 6.4a2 2 0 0 1-2 1.6H6.3a2 2 0 0 1-2-1.6z" fill="#8a5a3a" stroke="#3a2418" stroke-width=".8"/><ellipse cx="8" cy="6" rx="4.6" ry="1.4" fill="#1a110c" stroke="#e3a13a" stroke-width=".8"/><path d="M6 6.1c.8-.5 2.2-.6 3.2-.2" stroke="#f0c27a" stroke-width=".7" fill="none" stroke-linecap="round"/><path d="M10.7 6.8c.3 1.4.1 2.5-.4 3.1" stroke="#1a110c" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg>'},
+  gorse:{name:'Gorse Blossom',plural:'Gorse Blossoms',desc:'Yellow flowers off the moor’s gorse, spiny-stemmed and smelling of coconut.',icon:'<svg viewBox="0 0 16 16"><path d="M8 15V5M8 10.2 4.6 7.8M8 8l3.2-2.2M8 12.6l2.8-1.6" stroke="#4f7a3a" stroke-width="1.2" fill="none" stroke-linecap="round"/><circle cx="8" cy="3.6" r="2" fill="#f4c430"/><circle cx="4.2" cy="7" r="1.7" fill="#f4c430"/><circle cx="11.6" cy="5" r="1.7" fill="#f4c430"/><circle cx="11.2" cy="10.6" r="1.4" fill="#f4c430"/><circle cx="7.6" cy="3.1" r=".7" fill="#fff0a0"/></svg>'},
+  vial:{name:'Ether Vial',plural:'Ether Vials',desc:'Refined ether, ready for the lamp.',chip:false,icon:'<svg viewBox="0 0 16 16"><path d="M6.2 1.8h3.6v1.6H9.4v2.8l2.8 5.2a2 2 0 0 1-1.8 3H5.6a2 2 0 0 1-1.8-3l2.8-5.2V3.4h-.4z" fill="rgba(220,235,232,.35)" stroke="#e6dcef" stroke-width=".9"/><path d="M5 10.6h6l.8 1.6a1.2 1.2 0 0 1-1.1 1.8H5.3a1.2 1.2 0 0 1-1.1-1.8z" fill="#b37cff"/></svg>'}
 };
-const ORDER=['glowcap','kelp','brine','pearl','ichor','vial'];
+const ORDER=Object.keys(ITEMS);
 const counts={};
 let lastBigToast=-99;
 function pickupToast(id,n){
@@ -54,6 +59,7 @@ G.inv={
     G.emit('inv:change',{id,n:-n,total:counts[id]});
     return true;
   },
+  icon(id){ return (ITEMS[id]&&ITEMS[id].icon)||''; },
   list(){ return ORDER.concat(Object.keys(counts).filter(k=>!ORDER.includes(k))).filter(k=>counts[k]>0).map(id=>({id,n:counts[id],name:(ITEMS[id]||{name:id}).name})); }
 };
 
@@ -74,10 +80,17 @@ const RECIPES={
   // a healing draught the Traveler carries (potions.js drinks it: H / D-pad up / the touch bottle). Costs a kill's ichor on
   // top of two caps, so it competes with tincture (3 caps → 5 ether), bait and the distillate for the same satchel.
   mender:{id:'mender',name:'Mender’s Draught',needs:{glowcap:2,ichor:1},potion:1,
-    note:'Two caps to bind it, one bead of ichor to give back what was stolen. Warm going down. Mends three hearts.',from:'the keeper’s logbook'}
+    note:'Two caps to bind it, one bead of ichor to give back what was stolen. Warm going down. Mends three hearts.',from:'the keeper’s logbook'},
+  // staff oils (Spec: OILS.md): a row with oil:'<id>' brews one flask onto G.oils' belt (oils.js) and lists under "Oils"
+  kilnfire:{id:'kilnfire',name:'Kilnfire Oil',needs:{pitch:1,gorse:2},oil:'kilnfire',
+    note:'Kiln pitch worked warm with gorse flower. Dress the staff with it and what you strike catches.',from:'a charcoal-burner’s note'}
 };
 const RORDER=['tincture','mender','tidewater','ichor','pearl','bait'];
+const OORDER=Object.keys(RECIPES).filter(id=>RECIPES[id].oil); // oil recipes, in RECIPES order
 const potionsFull=()=>!!(G.potions&&G.potions.count>=G.potions.max);
+const OL=()=>(G.oils&&typeof G.oils.add==='function')?G.oils:null; // oils.js may load later, or not at all
+const oilsFull=()=>{ const o=OL(); return !!(o&&o.full&&o.full()); };
+const oilName=r=>{ const o=OL(), d=o&&o.OILS&&o.OILS[r.oil]; return (d&&d.name)||r.name; };
 const A=G.alchemy={
   ownsMushrooms:true,         // flow.js defers mushroom healing to us
   recipes:RECIPES,
@@ -95,7 +108,7 @@ const A=G.alchemy={
     refreshPanel();
     return true;
   },
-  canBrew(id){ const r=RECIPES[id]; if(!r||!A.known.has(id))return false; if(r.potion&&(!G.potions||potionsFull()))return false; for(const k in r.needs)if(!G.inv.has(k,r.needs[k]))return false; return true; },
+  canBrew(id){ const r=RECIPES[id]; if(!r||!A.known.has(id))return false; if(r.potion&&(!G.potions||potionsFull()))return false; if(r.oil&&(!OL()||oilsFull()))return false; for(const k in r.needs)if(!G.inv.has(k,r.needs[k]))return false; return true; },
   brew(id,o={}){ return brew(id,o); },
   /** sparkles off the bench whose panel is open, and its burner flaring (progression.js: tempering) */
   benchFx(hex,n,o){ const tb=activeTable||table; if(!tb)return; sparkle(tb.world.clone().setY(tb.world.y+tb.sparkleY),hex||'#c4a0ff',n||18,o||{}); brewT=Math.max(brewT,.6); setTimeout(()=>{ if(!brewing)brewT=0; },650); },
@@ -552,11 +565,14 @@ function brew(id,o={}){
     if(r.bait){ try{ G.moths.bait(r.bait); }catch(e){ console.error('moths.bait',e); }
       bigToast('Moth Bait','The lantern glass is smeared · '+r.bait+' s'); }
     else if(r.potion){ G.potions.add(r.potion,{silent:true}); bigToast(r.name,G.potions.count+' of '+G.potions.max+' carried · drink to mend three hearts'); }
+    else if(r.oil){ const o=OL(); let got=0; try{ got=o?o.add(r.oil,1):0; }catch(e){ console.error('oils.add',e); }
+      if(!got){ for(const k in r.needs)G.inv.add(k,r.needs[k],{silent:true}); bigToast(oilName(r),'No room on your belt · the ingredients are back in your satchel'); }
+      else bigToast(oilName(r),o.total()+' of '+o.max+' flasks on your belt'); }
     else{ A.etherUnits+=r.units; G.inv.add('vial',1,{silent:true});
       const n=G.inv.count('vial'); bigToast(r.name,'+'+r.units+' ether · '+n+(n>1?' vials':' vial')+' held'); }
     const tb=activeTable||table; if(tb)sparkle(tb.world.clone().setY(tb.world.y+tb.sparkleY),'#c4a0ff',26,{radius:.25,up:1.8});
-    G.emit('brew',{recipe:id,units:r.units||0});
-    if(!S.firsts.brew){ S.firsts.brew=1; setTimeout(()=>G.ui.say('The steam smells of rain and violets. What drips from the retort glows faintly in the vial — ether, the same stuff that burns in the lamp.'),300); }
+    G.emit('brew',{recipe:id,units:r.units||0,oil:r.oil||null});
+    if(!S.firsts.brew&&!r.oil){ S.firsts.brew=1; setTimeout(()=>G.ui.say('The steam smells of rain and violets. What drips from the retort glows faintly in the vial — ether, the same stuff that burns in the lamp.'),300); }
     refreshPanel(); chainNow();
   };
   if(o.instant){ finish(); return true; }
@@ -569,15 +585,8 @@ function brew(id,o={}){
 /* =====================================================================
    11. THE PANEL (parchment card)
    ===================================================================== */
-const ICON={
-  glowcap:'<svg viewBox="0 0 16 16"><path d="M2.2 8.6C2.6 4.6 5 2.6 8 2.6s5.4 2 5.8 6c-1.6.7-3.6 1-5.8 1s-4.2-.3-5.8-1z" fill="#a46cff"/><path d="M6.6 9.4h2.8l.5 4.4H6.1z" fill="#e6dcef"/><circle cx="6" cy="6" r=".9" fill="#e6d6ff"/><circle cx="9.6" cy="5" r=".7" fill="#e6d6ff"/></svg>',
-  kelp:'<svg viewBox="0 0 16 16" fill="none" stroke="#56e2d2" stroke-width="1.6" stroke-linecap="round"><path d="M4 14c-1-3 2-5 0-8s1-4 1-4"/><path d="M8.5 14c1-3-2-5 0-8s0-4 0-4"/><path d="M12.5 14c-1-2.5 1.8-4.2.2-6.6"/></svg>',
-  brine:'<svg viewBox="0 0 16 16"><path d="M7 1.6l2.6 4.6L7 14 4.4 6.2z" fill="#e8f0f8" stroke="#8ea4c4" stroke-width=".8"/><path d="M11.6 6l1.8 3-1.8 4.6-1.8-4.6z" fill="#d4e2f2" stroke="#8ea4c4" stroke-width=".7"/></svg>',
-  pearl:'<svg viewBox="0 0 16 16"><circle cx="8" cy="8.4" r="5" fill="#f4e4ee" stroke="#b49aac" stroke-width=".8"/><circle cx="6.4" cy="6.6" r="1.5" fill="#fff"/></svg>',
-  ichor:'<svg viewBox="0 0 16 16"><path d="M8 1.6C10 5 12.4 7.6 12.4 10.2A4.4 4.4 0 0 1 3.6 10.2C3.6 7.6 6 5 8 1.6z" fill="#0c0910" stroke="#9a6cff" stroke-width="1"/><path d="M6 9.6c.2-1.2.8-2 1.4-2.6" stroke="#d6bcff" stroke-width=".9" fill="none" stroke-linecap="round"/></svg>',
-  vial:'<svg viewBox="0 0 16 16"><path d="M6.2 1.8h3.6v1.6H9.4v2.8l2.8 5.2a2 2 0 0 1-1.8 3H5.6a2 2 0 0 1-1.8-3l2.8-5.2V3.4h-.4z" fill="rgba(220,235,232,.35)" stroke="#e6dcef" stroke-width=".9"/><path d="M5 10.6h6l.8 1.6a1.2 1.2 0 0 1-1.1 1.8H5.3a1.2 1.2 0 0 1-1.1-1.8z" fill="#b37cff"/></svg>',
-  bait:'<svg viewBox="0 0 16 16"><path d="M8 3c-2 2-5 1.6-6 4 2 .6 4 .2 6-1.6 2 1.8 4 2.2 6 1.6-1-2.4-4-2-6-4z" fill="#efe6d8"/><path d="M8 5.4v7" stroke="#6a5a50" stroke-width="1.2"/></svg>'
-};
+const ICON={bait:'<svg viewBox="0 0 16 16"><path d="M8 3c-2 2-5 1.6-6 4 2 .6 4 .2 6-1.6 2 1.8 4 2.2 6 1.6-1-2.4-4-2-6-4z" fill="#efe6d8"/><path d="M8 5.4v7" stroke="#6a5a50" stroke-width="1.2"/></svg>'}; // items' icons are added from ITEMS below
+for(const k in ITEMS)ICON[k]=ITEMS[k].icon;
 const CSS=`
 #alchemy .sheet{max-width:600px;width:100%;margin-block:auto;gap:14px;padding:26px 28px 22px}
 #alchemy.card{align-items:flex-start;background:linear-gradient(90deg,rgba(14,10,18,.86) 0%,rgba(14,10,18,.55) 55%,rgba(14,10,18,.15) 85%)}
@@ -599,6 +608,8 @@ const CSS=`
 .alch-rec .btn{padding:9px 18px;min-width:84px}
 .alch-rec .btn:disabled{opacity:.42;cursor:not-allowed;filter:none}
 .alch-tide{font-size:12.5px;color:#4b6a6a;margin-top:3px}
+.alch-group{display:grid;gap:8px;margin-top:6px}
+.alch-rec.oil.ready{background:rgba(227,161,58,.16);box-shadow:inset 0 0 0 1px rgba(140,90,30,.45)}
 .alch-lost{font-size:13.5px;color:#7a6a6e;font-style:italic;font-family:var(--serif);padding:2px 2px 0}
 .alch-sat{display:grid;gap:8px}
 .alch-chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -667,19 +678,23 @@ function refreshPanel(isBrewing){
   const list=$q('#alchList',panel), busy=!!brewing;
   $q('.alch-brewing',panel).hidden=!busy;
   const keepFocus=document.activeElement&&document.activeElement.dataset?document.activeElement.dataset.brew||document.activeElement.id:null;
-  let html='';
-  for(const id of RORDER){ if(!A.known.has(id))continue; const r=RECIPES[id], ok=A.canBrew(id);
-    const noMoths=r.bait&&!(G.moths&&G.moths.bait);
-    const yieldTxt=r.bait?'lures moths · '+r.bait+' s':r.potion?'mends '+((G.potions&&G.potions.heal||6)/2)+' hearts':r.units+' ether';
-    const full=r.potion&&potionsFull();
+  const row=id=>{ const r=RECIPES[id], ok=A.canBrew(id);
+    const noMoths=r.bait&&!(G.moths&&G.moths.bait), O=r.oil&&OL(), od=O&&O.OILS&&O.OILS[r.oil];
+    const yieldTxt=r.bait?'lures moths · '+r.bait+' s':r.potion?'mends '+((G.potions&&G.potions.heal||6)/2)+' hearts':r.oil?'1 flask'+(od&&od.dur?' · '+Math.round(od.dur)+' s coat':''):r.units+' ether';
+    const full=(r.potion&&potionsFull())||(r.oil&&oilsFull());
     const tidal=r.needs.kelp||r.needs.brine;
-    html+=`<div class="alch-rec${ok&&!noMoths?' ready':''}"><div><span class="nm">${esc(r.name)}</span><span class="yield">${yieldTxt}</span>
-      <div class="note">${esc(r.note)}</div><div class="alch-needs">${needsHTML(r)}</div>${tidal&&!ok?tideNote():''}${r.potion&&G.potions?`<div class="alch-tide">${full?'Your satchel holds no more draughts':G.potions.count+' of '+G.potions.max+' carried'}</div>`:''}</div>
-      <button class="btn" type="button" data-brew="${id}" ${ok&&!busy&&!noMoths?'':'disabled'} aria-label="Brew ${esc(r.name)}">${busy&&brewing===id?'Brewing':'Brew'}</button></div>`; }
+    const status=r.potion&&G.potions?(full?'Your satchel holds no more draughts':G.potions.count+' of '+G.potions.max+' carried')
+      :r.oil?(!O?'':full?'Belt full · '+O.max+' of '+O.max+' flasks carried':O.total()+' of '+O.max+' flasks on your belt'):'';
+    return `<div class="alch-rec${ok&&!noMoths?' ready':''}${r.oil?' oil':''}"><div><span class="nm">${esc(r.oil?oilName(r):r.name)}</span><span class="yield">${yieldTxt}</span>
+      <div class="note">${esc(r.note)}</div><div class="alch-needs">${needsHTML(r)}</div>${tidal&&!ok?tideNote():''}${status?`<div class="alch-tide">${esc(status)}</div>`:''}</div>
+      <button class="btn" type="button" data-brew="${id}" ${ok&&!busy&&!noMoths?'':'disabled'} aria-label="Brew ${esc(r.oil?oilName(r):r.name)}">${busy&&brewing===id?'Brewing':'Brew'}</button></div>`; };
+  let html=RORDER.filter(id=>A.known.has(id)).map(row).join('');
+  const oils=OORDER.filter(id=>A.known.has(id));
+  if(oils.length)html+=`<div class="alch-group" role="group" aria-label="Oils"><span class="eyebrow">Oils</span>${oils.map(row).join('')}</div>`;
   list.innerHTML=html;
-  const lost=RORDER.filter(id=>!A.known.has(id)).length;
+  const lost=RORDER.concat(OORDER).filter(id=>!A.known.has(id)).length;
   $q('#alchLost',panel).textContent=lost?(lost===1?'One recipe is still lost somewhere on the island.':lost+' recipes are still lost somewhere on the island.'):'Every recipe the keeper knew is yours.';
-  const chips=['glowcap','kelp','brine','pearl','ichor'].filter(k=>G.inv.count(k)>0||k==='glowcap').map(k=>`<span class="alch-chip${G.inv.count(k)?'':' empty'}" title="${esc(ITEMS[k].desc)}">${ICON[k]}${esc(ITEMS[k].name)} · ${G.inv.count(k)}</span>`).join('');
+  const chips=ORDER.filter(k=>ITEMS[k].chip!==false&&(G.inv.count(k)>0||ITEMS[k].chip==='always')).map(k=>`<span class="alch-chip${G.inv.count(k)?'':' empty'}" title="${esc(ITEMS[k].desc)}">${ICON[k]}${esc(ITEMS[k].name)} · ${G.inv.count(k)}</span>`).join('');
   $q('#alchChips',panel).innerHTML=chips;
   const n=G.inv.count('vial');
   $q('#alchVials',panel).innerHTML=n?`${ICON.vial.replace('<svg','<svg style="width:16px;height:16px;vertical-align:-3px"')} <b>${n} ${n>1?'vials':'vial'} · ${A.etherUnits} ether</b> — pour ${n>1?'them':'it'} into the lamp at the top of the lighthouse.`:'No ether yet. Brew a vial, then carry it up to the lamp.';
@@ -718,7 +733,7 @@ function padBack(){
 let satKey='';
 function refreshSatchel(changed){
   if(!satEl)return;
-  const items=['glowcap','kelp','brine','pearl','ichor','vial'].filter(k=>G.inv.count(k)>0);
+  const items=ORDER.filter(k=>G.inv.count(k)>0);
   satEl.hidden=!items.length;
   const key=items.map(k=>k+G.inv.count(k)).join(',')+'|'+A.etherUnits;
   if(key===satKey)return; satKey=key;
@@ -753,7 +768,7 @@ function nearestShroom(){
   for(const s of spots){ if(s.regrow>0)continue; const d=Math.hypot(s.pos.x-P.x,s.pos.z-P.z); if(d<bd){bd=d;best=s;} }
   return best?best.pos.clone():null;
 }
-function anyBrewable(){ return RORDER.some(id=>id!=='bait'&&!RECIPES[id].potion&&A.canBrew(id)); } // ether recipes only
+function anyBrewable(){ return RORDER.some(id=>id!=='bait'&&!RECIPES[id].potion&&!RECIPES[id].oil&&A.canBrew(id)); } // ether recipes only
 function chainNow(){ chainT=0; }
 let myStep='', foreignAt=-1;
 function setQ(step,obj,sub,target,name){
@@ -849,8 +864,9 @@ function onLoopStart(e){
   }
   chainNow();
 }
+let keptKnown=[];
 const PERSIST={
-  save:()=>({v:1,inv:Object.assign({},counts),ether:A.etherUnits,poured:A.poured,known:[...A.known],tide:+T.t.toFixed(1),
+  save:()=>({v:1,inv:Object.assign({},counts),ether:A.etherUnits,poured:A.poured,known:[...A.known,...keptKnown.filter(id=>!A.known.has(id))],tide:+T.t.toFixed(1),
     pages:pages.filter(p=>p.found).map(p=>p.id),regrow:spots.map(s=>Math.round(s.regrow)),
     S:{poured:S.poured,firsts:S.firsts,tidepool:S.tidepool,grove:S.grove,sighted:S.sighted}}),
   load:(d)=>{
@@ -858,7 +874,7 @@ const PERSIST={
     for(const k in counts)delete counts[k];
     Object.assign(counts,d.inv||{});
     A.etherUnits=d.ether|0; A.poured=d.poured|0;
-    A.known.clear(); (d.known||[]).forEach(id=>RECIPES[id]&&A.known.add(id)); A.known.add('tincture'); A.known.add('mender');
+    A.known.clear(); keptKnown=[]; (d.known||[]).forEach(id=>RECIPES[id]?A.known.add(id):keptKnown.push(id)); // ids this build doesn't know are kept for later builds A.known.add('tincture'); A.known.add('mender');
     const s=d.S||{}; S.poured=!!s.poured; S.firsts=Object.assign({},s.firsts||{}); S.tidepool=!!s.tidepool; S.sighted=Object.assign({},s.sighted||{});
     if(s.grove){ S.grove=true; groveRing(); }
     for(const p of pages){ p.found=(d.pages||[]).includes(p.id); p.mesh.visible=looping()&&!p.found&&!A.known.has(p.id); }
@@ -885,6 +901,7 @@ G.system('alchemy',{order:55,modes:'always',
     G.on('monster:killed',onKilled);
     G.on('blight:cured',onBlightCured);
     G.on('inv:change',e=>{ refreshSatchel(e&&e.id); if(panel&&!panel.hidden&&!brewing)refreshPanel(); });
+    G.on('oils:change',()=>{ if(panel&&!panel.hidden&&!brewing)refreshPanel(); });
     G.on('mode',e=>{ if(e.mode!=='menu'&&panel&&!panel.hidden){ panel.hidden=true; } });
     if(looping())onLoopStart({restored:true});
   },

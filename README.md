@@ -52,11 +52,14 @@ is in `DEVELOPMENT.md`; the engine API is in `CONTRACT.md`.
 | Lock on | Q | Lock | LT |
 | Lantern shutter | F | Shut | RB |
 | Drink a Mender’s Draught | H | bottle button | D-pad up |
+| Dress the staff with an oil | V, or hold H | hold the bottle button | hold D-pad up |
 | Ember: go (at a fox spot) / come to heel | R | fox button | D-pad left |
 | Corvin: go (at a raven spot) / scout | T | raven button | D-pad right |
 | Pause | Esc | pause button | Menu |
 
 Jump again in the air for a **double jump** (a moth-wing flutter of the Traveler's Cloak; once per jump, needs the cloak). Holding jump still glides afterwards. Roll in the air to **dive**. While you hold strike to charge the staff, the camera moves over your shoulder and a violet reticle appears: aim with the camera (mouse, right stick, right-thumb drag) and release to send an ether bolt to the reticle (a full charge sends a stronger bolt; aim at the ground close by for the spin attack instead). While locked on, the bolt seeks the target.
+
+While you carry a flask of staff oil, the draught button waits for you to let go: a quick press still drinks, a press held about a third of a second dresses the staff instead (with two or more kinds of oil carried, it opens a small picker). A coat lasts 90 seconds of play.
 
 ### Techniques
 
@@ -89,6 +92,8 @@ Every file in `js/` is one plain-script module talking to the others through `wi
 | `audio.js` | adaptive score from the Bravequest Theme stems, ambience, sound effects |
 | `fog.js`, `alchemy.js`, `moths.js` | the core loop: fog, gathering and brewing, the moth swarm |
 | `potions.js` | Mender’s Draught: the carried healing potion |
+| `oils.js` | staff oils: flasks on the belt, dressing the staff, the coat and what it does to what you strike |
+| `forage.js` | gathering in the wild: kiln pitch, gorse and the other oil ingredients, and when they grow back |
 | `companions.js` | Ember the fox and Corvin the raven: following, commands, companion spots, scouting |
 
 Assets: `audio/` holds the processed theme stems, `sfx/` the processed sound effects, `vendor/` Three.js and the fonts.
