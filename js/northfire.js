@@ -309,7 +309,7 @@ function lavaTex(){ if(_lava)return _lava;
   for(const t of [map,glow,wood,woodGlow,magma]){ t.wrapS=t.wrapT=THREE.RepeatWrapping; }
   return (_lava={map,glow,wood,woodGlow,magma}); }
 /* the hurtbox */
-const HB={team:'enemy',pos:V(),radius:1.5,height:6.2,targetable:true,corrupt:false,name:'The Wreck Giant',lockOffset:3,
+const HB={team:'enemy',oilKey:{boss:'wreckGiant'},oil:{burn:false},pos:V(),radius:1.5,height:6.2,targetable:true,corrupt:false,name:'The Wreck Giant',lockOffset:3,
   alive:()=>S.inside&&(B.state==='fight'||B.state==='shed'),hit:info=>hitGiant(info)};
 
 /* armour comes off: each piece is let go into the room with a shove, and lands among the rest of the wreckage */
@@ -341,7 +341,7 @@ function rise(o){ o=o||{}; if(S.done||!S.inside)return false; if(B.state!=='dorm
   if(first&&!B.said.tip){ B.said.tip=1; later(o.short?2.6:4.6,()=>toast('The Wreck Giant','Too hot to hurt. Pull a cistern chain when it’s under the spout, then strike')); }
   return true; }
 function hitGiant(info){
-  if(B.state!=='fight'||info.kind==='swarm')return;
+  if(B.state!=='fight'||info.kind==='swarm'||info.kind==='burn')return;   // it is made of fire: an oil's burn does nothing (a burst is an ordinary hit) (Spec: OILS.md)
   const cold=B.doused>0, mult=cold?T.cold:T.chip, d=(info.damage||1)*mult;
   B.hp=Math.max(0,B.hp-d); B.flash=cold?.5:.25;
   const hp=giantW().add(V(0,2.2*B.scale,0)); embers(hp.x-O.x,hp.y-O.y,hp.z-O.z,cold?4:8,{color:cold?'#8a8a90':'#ff8a3a',speed:2});

@@ -211,6 +211,7 @@ function decalTex(kind){
 
 /* ---------------------------------------------------------------- models */
 let crane=null, ledgerHB=null, craneHB=null, glowLight=null;
+const oilKey={boss:'crane'};   // shared by all of Crane's hurtboxes: an oil sees one target (the ledger itself never burns: only bolts count there)
 const flutter=[];
 function addM(parent,geo,mat,x=0,y=0,z=0){ const m=new THREE.Mesh(geo,mat); m.position.set(x,y,z); parent.add(m); return m; }
 function buildCrane(){
@@ -304,17 +305,17 @@ function build(){
   if(B.built)return; B.built=true; arenaGeo();
   crane=buildCrane(); buildPools();
   for(const k of ['tamsin','corwin','wren','hob'])B.figs.push(Object.assign(buildFigure(k),{pos:V(),hist:[],real:false,alive:false,hb:null,ang:0,face:0,burst:0,sink:0}));
-  craneHB={team:'enemy',pos:B.pos,radius:.85,height:3.4,targetable:true,corrupt:false,name:'Aldous Crane',lockOffset:2.1,crane:true,
+  craneHB={team:'enemy',oilKey,oil:{burn:true},pos:B.pos,radius:.85,height:3.4,targetable:true,corrupt:false,name:'Aldous Crane',lockOffset:2.1,crane:true,
     alive:()=>B.state==='fight'&&B.phase!==2&&B.fade>.5,hit:info=>hitCrane(info)};
   G.combat.add(craneHB);
   // the open ledger: the moths' prey (creatures.js steers the swarm onto corrupt hurtboxes that opt in) + the bolt weak point
-  ledgerHB={team:'enemy',pos:V(),radius:.6,height:1.1,targetable:false,corrupt:true,name:'The Tithe Ledger',lockOffset:.55,ledger:true,
+  ledgerHB={team:'enemy',oilKey,oil:{burn:false},pos:V(),radius:.6,height:1.1,targetable:false,corrupt:true,name:'The Tithe Ledger',lockOffset:.55,ledger:true,
     mothPrey:()=>B.ledger.open,mothRange:30,mothWant:999,mothDamage:0,
     alive:()=>B.state==='fight'&&B.phase===3&&B.ledger.open,hit:info=>hitLedger(info)};
   Object.defineProperty(ledgerHB,'targetable',{get:()=>B.ledger.open&&B.phase===3,enumerable:true});
   G.combat.add(ledgerHB);
   for(const f of B.figs){
-    f.hb={team:'enemy',pos:f.pos,radius:.55,height:1.8,targetable:true,corrupt:false,name:'One of the Borrowed',lockOffset:1.1,fig:f,
+    f.hb={team:'enemy',oilKey,oil:{burn:true},pos:f.pos,radius:.55,height:1.8,targetable:true,corrupt:false,name:'One of the Borrowed',lockOffset:1.1,fig:f,
       alive:()=>B.state==='fight'&&B.phase===2&&f.alive&&f.sink<.5,hit:info=>hitFigure(f,info)};
     G.combat.add(f.hb);
   }
@@ -406,20 +407,28 @@ function clearSummoned(){ for(const m of summoned)if(m.alive&&G.monsters&&G.mons
 /* ---------------------------------------------------------------- hits */
 function damage(d,info,pos,real){
   if(B.hp<=0)return;
+  if(info&&info.kind==='burn'){ B.hp=Math.max(0,B.hp-d); afterDamage(); return; }   // an oil's burn: health only, no fx, event or hit window
   B.hp=Math.max(0,B.hp-d); B.flash=1; B.lastHitT=G.time;
   const F=FX(); if(F)F.splash(V(pos.x,pos.y,pos.z),(info&&info.dir)||V(0,0,1),.9);
   const I=INK(); I&&I.burst(pos,{n:8,speed:2,size:[.3,.8],life:[.4,.9],up:1,embers:4,drops:2});
   pageBurst(pos,4);
   G.ui.shake&&G.ui.shake(.1);
   G.emit('undercroft:bossHit',{damage:d,hp:B.hp,real:!!real});
+  afterDamage();
+}
+function afterDamage(){
   if(B.hp<=0)startDying();
   else if(B.phase===1&&B.hp<=T.p2)enterPhase(2);
   else if(B.phase===2&&B.hp<=T.p3)enterPhase(3);
 }
+// one oil burst lands once on Crane, however many of his hurtboxes (him, a figure) it reaches in the same frame
+function blastOnce(info){ if(info.kind!=='blast')return true; if(B.blastT===G.time)return false; B.blastT=G.time; return true; }
 const _hp=V();
 function hitCrane(info){
   if(B.state!=='fight'||B.phase===2||info.kind==='swarm')return;
-  if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return; B.lastKind=info.kind;
+  if(info.kind==='burn'){ damage((info.damage||1)*(B.staggerT>0?T.staggerMul:B.phase===3&&B.ledger.open?T.guardMul:1),info); return; }   // Spec: OILS.md
+  if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return;
+  if(!blastOnce(info))return; B.lastKind=info.kind;
   let d=info.damage||1;
   if(B.staggerT>0)d*=T.staggerMul;
   else if(B.phase===3&&B.ledger.open){ d*=T.guardMul; pageBurst(_hp.set(B.pos.x,floorY+1.8,B.pos.z),6); }   // the names close over him
@@ -435,8 +444,10 @@ function hitLedger(info){
 }
 function hitFigure(f,info){
   if(B.phase!==2||!f.alive||info.kind==='swarm')return;
+  if(info.kind==='burn'){ if(f.real)damage((info.damage||1)*(B.staggerT>0?T.staggerMul:1),info); return; }   // a burn never bursts a copy or makes them shuffle
   if(f.real){
-    if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return; B.lastKind=info.kind;
+    if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return;
+    if(!blastOnce(info))return; B.lastKind=info.kind;
     f.flash=1; damage((info.damage||1)*(B.staggerT>0?T.staggerMul:1),info,_hp.set(f.pos.x,floorY+1.2,f.pos.z),true);
     if(B.phase===2&&!B.shuffleAt){ B.shuffleAt=G.time+1.3; B.staggerT=1.2;
       if(!S.said.realHit)later(.4,()=>say('realHit','It’s him. Under the borrowed shape something gives like wet paper — and all four of them flinch.',null,{priority:'high'})); }
