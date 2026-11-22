@@ -35,7 +35,7 @@ const P=()=>G.player, O=()=>G.oils, F=()=>G.forage;
 const SPOT={x:150,y:42.2,z:-14,yaw:Math.PI*.5};          // the open headland: room to fight, far from every monster zone
 const step=s=>G.step(1/30,Math.max(1,Math.round(s*30)));
 const ev=[];   // events seen since the last T.flush()
-const pick=(n,e)=>{ const o={n}; if(e)for(const k of ['id','item','reason','damage','recipe','oil','dur','total','count'])if(e[k]!==undefined)o[k]=e[k];
+const pick=(n,e)=>{ const o={n}; if(e&&e.n!==undefined)o.num=e.n; if(e)for(const k of ['id','item','reason','damage','recipe','oil','dur','total','count'])if(e[k]!==undefined)o[k]=e[k];
   if(e&&e.target)o.target=e.target; if(e&&e.pos)o.pos=[+e.pos.x.toFixed(1),+e.pos.y.toFixed(1),+e.pos.z.toFixed(1)]; o.t=+G.time.toFixed(2); return o; };
 for(const n of ['oils:change','oil:apply','oil:on','oil:off','oil:ignite','oil:burn','forage:pick','forage:note','brew','potion:drink','player:attack','inv:change'])
   G.on(n,e=>ev.push(pick(n,e)));
@@ -52,7 +52,9 @@ function home(){ play(); clear(60); const p=P(); p.teleport(SPOT.x,null,SPOT.z,S
 /** a monster of `kind` d m in front of the player (headland), standing still until struck */
 function foe(kind,d){ const p=P(), h=p.heading!=null?p.heading:SPOT.yaw; const x=p.pos.x+Math.sin(h)*(d||2.2), z=p.pos.z+Math.cos(h)*(d||2.2);
   const m=G.monsters.spawn(kind,{x,y:p.pos.y,z},{aggro:false}); m.cool=99; return m; }
-function hit(m,kind,dmg){ return G.combat.strike({x:m.pos.x,y:m.pos.y+1,z:m.pos.z,radius:.7,team:'player',damage:dmg||2,knockback:2,kind:kind||'melee',source:'test'}).length; }
+// the Traveler's own blow (a bolt's source is the bolt itself, as a real one's is)
+function hit(m,kind,dmg){ const src=kind==='bolt'?{team:'player',kind:'bolt',test:true}:P();
+  return G.combat.strike({x:m.pos.x,y:m.pos.y+1,z:m.pos.z,radius:.7,team:'player',damage:dmg||2,knockback:2,kind:kind||'melee',source:src}).length; }
 function burning(m){ const o=O(); try{ return !!(o.burning(m)||(m.hb&&o.burning(m.hb))); }catch(e){ return 'ERR '+e.message; } }
 function near(pos,re,r){ const out=[]; for(const o of G.interact.list){ if(o.enabled&&!o.enabled())continue; const q=typeof o.pos==='function'?o.pos():o.pos; if(!q)continue;
   if(Math.hypot(q.x-pos.x,q.z-pos.z)>(r||5))continue; const l=G.interact.label(o); if(!re||re.test(String(l)))out.push({o,l}); } return out; }
@@ -144,7 +146,7 @@ async def main_checks(pg):
     # before the core loop: no pitch to scrape, no gorse to pick
     await run(pg,'dormant-before-loop',60,"""(()=>{ T.flush(); const loop=!!G.loop.active, g0=G.inv.count('gorse'), p0=G.inv.count('pitch');
         const g=T.spots('gorse')[0]; let walk=null; if(g)walk=T.walkTo(g,2.5);
-        const k=G.forage.kiln.pos; T.face(k,1.4); const offers=T.near(k,/pitch|note/i,4).map(x=>x.l);
+        const k=G.forage.kiln.pos; G.forage.debug.tp('kiln'); G.step(1/30,3); const offers=T.near(k,/pitch|note/i,4).map(x=>x.l);
         return {loop,gorse:G.inv.count('gorse')-g0,pitch:G.inv.count('pitch')-p0,picks:T.of('forage:pick').length,offers,walk,total:G.oils.total(),armed:G.oils.armed()}; })()""",
         lambda r:not r['loop'] and r['gorse']==0 and r['pitch']==0 and r['picks']==0 and not r['offers'] and r['total']==0 and not r['armed'],MOD)
 
@@ -162,24 +164,25 @@ async def main_checks(pg):
 
     await run(pg,'gorse-pick',60,"""(()=>{ T.flush(); const s=T.spots('gorse')[0], g0=G.inv.count('gorse'); const w=T.walkTo(s,4); window.__gorse=s.id;
         const p=T.of('forage:pick')[0]; return {walk:w,got:G.inv.count('gorse')-g0,ev:p,ready:s.ready,left:+(+s.left).toFixed(1)}; })()""",
-        lambda r:r['ev'] and r['ev']['item']=='gorse' and 1<=r['got']<=2 and r['ev']['n']==r['got'] and not r['ready'] and 230<=r['left']<=240.5 and r['walk']['dist']<=1.6,LOOP)
+        lambda r:r['ev'] and r['ev']['item']=='gorse' and 1<=r['got']<=2 and r['ev']['num']==r['got'] and not r['ready'] and 230<=r['left']<=240.5 and r['walk']['dist']<=1.6,LOOP)
     await run(pg,'gorse-regrow',60,"""(()=>{ const s=G.forage.spots.find(q=>q.id===__gorse); const l0=+s.left; T.play(); T.step(2); const l1=+s.left;
         G.setMode('paused'); G.step(1/30,60); const lp=+s.left; T.play();
-        s.left=.5; T.step(1.2); const ready=s.ready; T.flush(); const g0=G.inv.count('gorse'); T.walkTo(s,4);
+        T.home(); s.left=.5; T.step(1.2); const ready=s.ready;   /* away from the bush first: standing in it would pick it as it regrows */ T.flush(); const g0=G.inv.count('gorse'); T.walkTo(s,4);
         return {ran:+(l0-l1).toFixed(2),pausedRan:+(l1-lp).toFixed(2),ready,again:G.inv.count('gorse')-g0}; })()""",
         lambda r:1.8<=r['ran']<=2.2 and abs(r['pausedRan'])<.05 and r['ready'] and r['again']>=1,LOOP+('gorse-pick',))
 
     # the kiln: a real E press scrapes two pitch; the pot is empty until it refills
-    await run(pg,'kiln-scrape',60,"""(()=>{ T.flush(); const k=G.forage.kiln.pos; T.face(k,1.4); const c=G.interact.pick(G.player.pos), lab=c&&G.interact.label(c), p0=G.inv.count('pitch');
+    await run(pg,'kiln-scrape',60,"""(()=>{ T.flush(); const k=G.forage.kiln.pos; G.forage.debug.tp('kiln'); G.step(1/30,3); const c=G.interact.pick(G.player.pos), lab=c&&G.interact.label(c), p0=G.inv.count('pitch');
         window.__kilnLab=lab; return {lab,p0}; })()""",lambda r:bool(r['lab']) and 'pitch' in r['lab'].lower(),LOOP)
     if 'kiln-scrape' not in failed:
+        await shot(pg,'kiln-full')
         await pg.keyboard.press('KeyE')
         await run(pg,'kiln-scrape-gives',60,"""(()=>{ G.step(1/30,4); const s=T.spots('pitch')[0]||null; const p=T.of('forage:pick').find(e=>e.item==='pitch');
             return {ev:p,pitch:G.inv.count('pitch'),spot:s&&{id:s.id,ready:s.ready,left:+(+s.left).toFixed(1)},offer:T.near(G.forage.kiln.pos,/pitch/i,4).map(x=>x.l)}; })()""",
-            lambda r:r['ev'] and r['ev']['n']==2 and r['pitch']==2 and r['spot'] and not r['spot']['ready'] and 230<=r['spot']['left']<=240.5,LOOP+('kiln-scrape',))
+            lambda r:r['ev'] and r['ev']['num']==2 and r['pitch']==2 and r['spot'] and not r['spot']['ready'] and 230<=r['spot']['left']<=240.5,LOOP+('kiln-scrape',))
     else: skip('kiln-scrape-gives','needs kiln-scrape')
     await shot(pg,'kiln')
-    await run(pg,'kiln-refill',60,"""(()=>{ const s=T.spots('pitch')[0]; s.left=.5; T.step(1.2); const ready=s.ready; const k=G.forage.kiln.pos; T.face(k,1.4);
+    await run(pg,'kiln-refill',60,"""(()=>{ const s=T.spots('pitch')[0]; T.home(); s.left=.5; T.step(1.2); const ready=s.ready;   /* away from the bush first: standing in it would pick it as it regrows */ const k=G.forage.kiln.pos; G.forage.debug.tp('kiln'); G.step(1/30,3);
         const c=G.interact.pick(G.player.pos), lab=c&&G.interact.label(c); const p0=G.inv.count('pitch'); if(c&&/pitch/i.test(lab))c.use(); G.step(1/30,3);
         return {ready,lab,got:G.inv.count('pitch')-p0}; })()""",
         lambda r:r['ready'] and r['got']==2,LOOP+('kiln-scrape-gives',))
@@ -308,7 +311,7 @@ async def main_checks(pg):
                      and r['g'] and not r['g']['ready'] and -0.01<=r['g']['d']<=3 and r['k'] and r['k']['ready']==r['kready0'] and (r['kready0'] or -0.01<=r['k']['d']<=3)
                      and r['note'] and r['known'],COAT+('save',))
         # an older save, written before oils and forage existed: loads with nothing carried and every bush ready
-        made=await ev(pg,"""(()=>{ T.play(); G.flow.writeSave(); const d=JSON.parse(localStorage.getItem('bq-save-v1')); delete d.mods.oils; delete d.mods.forage;
+        made=await ev(pg,"""(()=>{ T.play(); G.flow.writeSave(); G.setMode('paused'); const d=JSON.parse(localStorage.getItem('bq-save-v1')); delete d.mods.oils; delete d.mods.forage;
             localStorage.setItem('bq-save-v1',JSON.stringify(d)); return true; })()""")
         if made is True:
             try: await asyncio.wait_for(reload_continue(pg),300)
@@ -318,6 +321,88 @@ async def main_checks(pg):
         else: skip('old-save-loads','could not write the old save')
     else:
         skip('reload-keeps','needs save'); skip('old-save-loads','needs save')
+
+# ------------------------------------------------------------------ the picker and the draught button with a controller and on touch
+PAD_JS=r"""
+window.__pad={id:'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)',index:0,connected:true,mapping:'standard',timestamp:0,axes:[0,0,0,0],
+  buttons:Array.from({length:17},()=>({pressed:false,touched:false,value:0}))};
+window.__btn=(i,on)=>{ __pad.buttons[i]={pressed:!!on,touched:!!on,value:on?1:0}; __pad.timestamp++; };
+navigator.getGamepads=()=>[__pad,null,null,null];
+"""
+# two kinds on the belt (a Kilnfire and a Burst flask), so the long hold opens the picker
+TWO_KINDS="(()=>{ G.oils.take('kilnfire',G.oils.count('kilnfire')); G.oils.debug.give('kilnfire',1); G.oils.debug.give('burst',1); T.flush(); G.step(1/30,2); return G.oils.list().map(o=>o.id); })()"
+PICKER="(()=>{ const pk=document.getElementById('oilPicker'); return {open:!!(pk&&!pk.hidden),mode:G.state.mode,opts:pk?[...pk.querySelectorAll('.opt')].map(b=>b.dataset.oil):[],focus:document.activeElement&&document.activeElement.dataset?document.activeElement.dataset.oil||document.activeElement.id:null}; })()"
+
+async def pad_suite(b):
+    errs=[]
+    ctx=await b.new_context(viewport={'width':1000,'height':620}); await ctx.add_init_script(PAD_JS)
+    pg=await ctx.new_page(); pg.set_default_timeout(240000)
+    pg.on('pageerror',lambda e:errs.append('pageerror: '+str(e)))
+    pg.on('console',lambda m:errs.append('console: '+m.text) if m.type=='error' and '404' not in m.text else None)
+    try:
+        await pg.goto(URL,timeout=180000); await ready(pg); await ev(pg,LIB)
+        await run(pg,'pad:start',120,"(()=>{ G.devtools.start('oils-fight'); G.step(1/30,30); T.settle(10); T.home(); return {n:G.oils.total(),pad:G.input.gamepad.connected}; })()",
+            lambda r:r['n']==3 and r['pad'])
+        N=('pad:start',)
+        # D-pad up held: the staff is dressed straight away with one kind (and nothing is drunk); mid-dress screenshot
+        await run(pg,'pad:hold-dresses',60,"""(()=>{ T.flush(); G.player.hp=G.player.maxHp-4; __btn(12,true); G.step(1/30,12); __btn(12,false); G.step(1/30,12);
+            const out={apply:T.of('oil:apply').map(e=>e.id),drink:T.of('potion:drink').length,pose:G.player.state}; return out; })()""",
+            lambda r:r['apply']==['kilnfire'] and r['drink']==0,N)
+        await shot(pg,'dressing-pose')
+        await ev(pg,"(()=>{ T.step(1.5); return 1; })()")
+        await ev(pg,TWO_KINDS)
+        await run(pg,'pad:picker-opens',60,"(()=>{ __btn(12,true); G.step(1/30,12); const r="+PICKER+"; __btn(12,false); G.step(1/30,4); return Object.assign(r,{after:"+PICKER+"}); })()",
+            lambda r:r['open'] and r['mode']=='paused' and r['opts']==['kilnfire','burst'] and r['after']['open'] and r['after']['focus']=='kilnfire',N+('pad:hold-dresses',))
+        await shot(pg,'picker-pad')
+        await run(pg,'pad:picker-choose',60,"""(()=>{ __btn(13,true); G.step(1/30,2); __btn(13,false); G.step(1/30,3); const f=document.activeElement&&document.activeElement.dataset.oil;
+            __btn(0,true); G.step(1/30,2); __btn(0,false); G.step(1/30,2); const p="""+PICKER+"""; T.step(1.4);
+            return {f,closed:!p.open,mode:G.state.mode,apply:T.of('oil:apply').map(e=>e.id),active:G.oils.active&&G.oils.active.id,drink:T.of('potion:drink').length,left:G.oils.list().map(o=>o.id)}; })()""",
+            lambda r:r['f']=='burst' and r['closed'] and r['mode']=='play' and r['apply']==['burst'] and r['active']=='burst' and r['drink']==0 and r['left']==['kilnfire'],N+('pad:picker-opens',))
+        await run(pg,'pad:picker-back',60,"""(()=>{ G.oils.debug.give('burst',1); T.flush(); __btn(12,true); G.step(1/30,12); __btn(12,false); G.step(1/30,3); const o="""+PICKER+""";
+            __btn(1,true); G.step(1/30,2); __btn(1,false); G.step(1/30,3); return {opened:o.open,after:"""+PICKER+""",apply:T.of('oil:apply').length,n:G.oils.total()}; })()""",
+            lambda r:r['opened'] and not r['after']['open'] and r['after']['mode']=='play' and r['apply']==0 and r['n']==2,N+('pad:picker-opens',))
+    finally:
+        real=[e for e in errs if '404' not in e]
+        check('pad: no page errors',not real,real[:6])
+        await ctx.close()
+
+TOUCH_JS=r"""
+window.TB=()=>document.querySelector('#touch button[data-act=potion]');
+window.TP=t=>TB().dispatchEvent(new PointerEvent(t,{bubbles:true,cancelable:true,pointerType:'touch',pointerId:9,isPrimary:true}));
+'ok'"""
+async def touch_suite(b):
+    errs=[]
+    ctx=await b.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True,device_scale_factor=2)
+    pg=await ctx.new_page(); pg.set_default_timeout(240000)
+    pg.on('pageerror',lambda e:errs.append('pageerror: '+str(e)))
+    pg.on('console',lambda m:errs.append('console: '+m.text) if m.type=='error' and '404' not in m.text else None)
+    try:
+        await pg.goto(URL,timeout=180000); await ready(pg); await ev(pg,LIB); await ev(pg,TOUCH_JS)
+        await run(pg,'touch:start',120,"(()=>{ G.devtools.start('oils-fight'); G.step(1/30,30); T.settle(10); T.home(); const b=TB(); return {n:G.oils.total(),btn:!!(b&&!b.hidden&&b.getClientRects().length),device:G.input.device}; })()",
+            lambda r:r['n']==3 and r['btn'])
+        N=('touch:start',)
+        # a tap on the bottle still drinks while a flask is carried; a long press dresses the staff
+        await run(pg,'touch:tap-drinks',60,"""(()=>{ T.flush(); G.player.hp=G.player.maxHp-4; if(G.potions.count<1)G.potions.add(1,{silent:true}); TP('pointerdown'); G.step(1/30,3); const early=T.of('potion:drink').length;
+            TP('pointerup'); G.step(1/30,3); const out={early,drink:T.of('potion:drink').length,apply:T.of('oil:apply').length,n:G.oils.total()}; T.step(3); return out; })()""",
+            lambda r:r['early']==0 and r['drink']==1 and r['apply']==0 and r['n']==3,N)
+        await run(pg,'touch:long-press-dresses',60,"""(()=>{ T.flush(); G.player.hp=G.player.maxHp-4; TP('pointerdown'); G.step(1/30,12); TP('pointerup'); G.step(1/30,3); const a=T.of('oil:apply').map(e=>e.id), d=T.of('potion:drink').length;
+            T.step(1.5); return {apply:a,drink:d,active:G.oils.active&&G.oils.active.id,n:G.oils.total()}; })()""",
+            lambda r:r['apply']==['kilnfire'] and r['drink']==0 and r['active']=='kilnfire' and r['n']==2,N)
+        await ev(pg,TWO_KINDS)
+        await run(pg,'touch:picker-opens',60,"(()=>{ TP('pointerdown'); G.step(1/30,12); TP('pointerup'); G.step(1/30,3); return "+PICKER+"; })()",
+            lambda r:r['open'] and r['mode']=='paused' and r['opts']==['kilnfire','burst'],N+('touch:long-press-dresses',))
+        await shot(pg,'picker-touch')
+        if 'touch:picker-opens' not in failed:
+            try: await pg.tap('#oilPicker .opt[data-oil=burst]',timeout=30000); ok=True
+            except Exception as e: check('touch:picker-tap',False,{'error':str(e)[:200]}); ok=False
+            if ok:
+                await run(pg,'touch:picker-tap',60,"(()=>{ const p="+PICKER+"; T.step(1.4); return {closed:!p.open,mode:G.state.mode,apply:T.of('oil:apply').map(e=>e.id),active:G.oils.active&&G.oils.active.id,drink:T.of('potion:drink').length}; })()",
+                    lambda r:r['closed'] and r['mode']=='play' and r['apply']==['burst'] and r['active']=='burst' and r['drink']==0,N)
+        else: skip('touch:picker-tap','needs touch:picker-opens')
+    finally:
+        real=[e for e in errs if '404' not in e]
+        check('touch: no page errors',not real,real[:6])
+        await ctx.close()
 
 # ------------------------------------------------------------------ the Test tools start points (each on a fresh page)
 async def start_suite(b,sid,js,test):
@@ -339,16 +424,20 @@ START_FIGHT="""(()=>{ const p=G.player.pos; const near=G.monsters.list.filter(m=
 
 async def main():
     t0=time.time()
+    only=os.environ.get('ONLY')   # e.g. ONLY=pad,touch runs just those parts (main, pad, touch, starts)
+    want=lambda k:not only or k in only.split(',')
     async with async_playwright() as p:
         b=await p.chromium.launch(**CHROME)
-        try: await asyncio.wait_for(main_suite(b),1500)
-        except asyncio.TimeoutError: check('main-suite',False,{'timeout':1500})
-        try: await asyncio.wait_for(start_suite(b,'oils',START_OILS,
-                lambda r:r['mode']=='play' and r['loop'] and r['test'] and r['known'] and r['pitch']>=1 and r['gorse']>=2 and r['can'] and r['d'] is not None and r['d']<2.8 and r['lab']=='Work the alchemy table'),400)
-        except asyncio.TimeoutError: check('start:oils',False,{'timeout':400})
-        try: await asyncio.wait_for(start_suite(b,'oils-fight',START_FIGHT,
-                lambda r:r['mode']=='play' and r['loop'] and r['test'] and r['n']==3 and r['armed'] and r['hollows']>=1 and r['known']),400)
-        except asyncio.TimeoutError: check('start:oils-fight',False,{'timeout':400})
+        parts=[('main',lambda:main_suite(b),1500),('pad',lambda:pad_suite(b),500),('touch',lambda:touch_suite(b),500),
+          ('starts',lambda:start_suite(b,'oils',START_OILS,
+              lambda r:r['mode']=='play' and r['loop'] and r['test'] and r['known'] and r['pitch']>=1 and r['gorse']>=2 and r['can'] and r['d'] is not None and r['d']<2.8 and r['lab']=='Work the alchemy table'),400),
+          ('starts',lambda:start_suite(b,'oils-fight',START_FIGHT,
+              lambda r:r['mode']=='play' and r['loop'] and r['test'] and r['n']==3 and r['armed'] and r['hollows']>=1 and r['known']),400)]
+        for k,fn,budget in parts:
+            if not want(k): continue
+            try: await asyncio.wait_for(fn(),budget)
+            except asyncio.TimeoutError: check(k+'-suite',False,{'timeout':budget})
+            except Exception as e: check(k+'-suite',False,{'error':str(e)[:300]})
         await b.close()
     print('RESULT', 'PASS' if ok_all else 'FAIL '+', '.join(sorted(failed)), f'{time.time()-t0:.0f}s', flush=True)
     sys.exit(0 if ok_all else 1)

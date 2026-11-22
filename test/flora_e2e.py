@@ -23,7 +23,8 @@ MEASURE='--measure' in sys.argv
 LAYOUT_ONLY='--layout-only' in sys.argv   # with --measure: stop after the layout
 
 # ---- measured on main (origin/main 57298c9, before the plant work) with this file's --measure, 960x600 ----
-LAYOUT_HASH='7ddccccf'   # 771 trees, 2109 ferns, 825 bushes, 8451 flowers (after the hollow is cleared), 1216 circle + 238 box colliders
+LAYOUT_HASH='2006640d'   # 771 trees, 2106 ferns, 822 bushes, 8451 flowers (after the hollow is cleared), 1217 circle + 238 box colliders
+# (re-taken for the charcoal kiln in the old wood: 3 ferns and 3 bushes left out of its clearing, and its own collider; main was 7ddccccf)
 # (re-taken when the invisible barriers went: a cliff scree's colliders moved onto its rock, the hidden boat's mooring post no longer added at build)
 MAIN={'forest':{'saver':{'tris':598361,'draws':68},'balanced':{'tris':743561,'draws':68},'high':{'tris':859721,'draws':68}},   # plant triangles / draw calls in view
       'moor':{'saver':{'tris':723810,'draws':88},'balanced':{'tris':869010,'draws':88},'high':{'tris':985170,'draws':88}}}

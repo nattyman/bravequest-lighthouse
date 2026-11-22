@@ -298,7 +298,7 @@ const PERSIST={
     return {v:1,n:Object.assign({},S.n),active,fixed:S.fixed,hint:S.hint};
   },
   load:d=>{
-    if(!d)return;
+    d=d||{};   // null (a new game, or a save from before oils): nothing carried, no coat, nothing fixed
     stopDress(); bufT=0; bufId=null; burns.forEach((b,k)=>endBurn(k,b)); closePicker();
     S.n={}; let room=N.max;
     for(const id of Object.keys(OILS)){ const n=Math.min(room,Math.max(0,(d.n&&d.n[id])|0)); if(n>0){ S.n[id]=n; room-=n; } }
@@ -307,6 +307,7 @@ const PERSIST={
     changed(null);
   }
 };
+G.on('game:reset',()=>PERSIST.load(null));
 if(G.persist&&G.persist.register)G.persist.register('oils',PERSIST);
 else G.on('ready',()=>{ if(G.persist&&G.persist.register)G.persist.register('oils',PERSIST); });
 

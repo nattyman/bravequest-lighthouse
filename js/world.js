@@ -11,6 +11,7 @@ const {clamp,lerp,smooth,vnoise,fbm}=U;
 const PI=Math.PI, TAU=PI*2, TOP=42;
 const W=G.world;
 W.seaLevel=0;
+W.plantClearings=[];   // [{x,z,r}] kept free of ferns and bushes (see the undergrowth below); push at load time
 
 /* =====================================================================
    1. ANALYTIC TERRAIN (available at script evaluation)
@@ -995,6 +996,12 @@ function buildForest(){
   for(let i=0;i<500;i++){const x=-56+r()*240,z=-100+r()*200; const h=gh(x,z); if(h<2.5||gslope(x,z)>.7||pathDist(x,z)<3)continue;
     if(x>112&&h<41.9)continue; if(Math.hypot(x-180,z)<20||Math.hypot(x-165,z)<20)continue; if(!clearOf(x,z,1))continue;
     const s=.45+r()*.5; _c.setHSL(.18+r()*.1,.3,.42+r()*.1); bushes.add(mat4(x,h+.2*s,z,0,r()*TAU,0,s*1.2,s*.9,s*1.2),_c.clone().multiplyScalar(1.5));}
+  // small places other modules keep free of ferns and bushes (W.plantClearings, filled at load time; forage.js: the kiln),
+  // left out here so the old plants and undergrowth.js agree; no random draws change, so the rest stays where it was
+  const PC=W.plantClearings;
+  if(PC.length)for(const tl of [ferns,bushes])for(const [k,items] of [...tl.t]){
+    const keep=items.filter(([m])=>!PC.some(c=>Math.hypot(m.elements[12]-c.x,m.elements[14]-c.z)<c.r));
+    if(keep.length===items.length)continue; if(keep.length)tl.t.set(k,keep); else tl.t.delete(k); }
   W.stats.ferns=ferns.count; W.stats.bushes=bushes.count;
   // undergrowth.js, when loaded, draws the ferns and bushes itself from these same placements
   const UG=G.undergrowth&&G.undergrowth.build;

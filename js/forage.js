@@ -28,7 +28,7 @@ const NOTE='Pitch off the kiln floor, worked warm into the wood. Gorse flower fo
 const POT={x:-104,z:-7}, KC={x:-102.9,z:-9.9}, POST={x:-101.05,z:-10.75}, KILN_R=1.45;
 
 // keep the wood's undergrowth out of the kiln's little clearing (undergrowth.js reads these when the world builds)
-if(G.undergrowth&&G.undergrowth.clearings)G.undergrowth.clearings.push({x:KC.x,z:KC.z,r:KILN_R+1.4},{x:POT.x,z:POT.z,r:1.5},{x:POST.x,z:POST.z,r:.9});
+if(G.world&&G.world.plantClearings)G.world.plantClearings.push({x:KC.x,z:KC.z,r:KILN_R+1.4},{x:POT.x,z:POT.z,r:1.5},{x:POST.x,z:POST.z,r:.9});
 const H=(x,z)=>G.world.height(x,z);
 const looping=()=>!!(G.loop&&G.loop.active);
 const isPlay=()=>G.state&&G.state.mode==='play';
@@ -210,7 +210,9 @@ function setReady(s,ready,left){
 }
 function kilnLook(){ const s=byId.kiln; if(!tar||!s)return;
   tar.position.y=s.ready?tar.userData.full:tar.userData.low; tar.scale.setScalar(s.ready?1:.82);
-  tar.material.color.copy(col(s.ready?'#0c0a0b':'#2a2420')); tar.material.shininess=s.ready?80:6; tar.material.specular.copy(col(s.ready?'#8a7660':'#151210')); }
+  // full: glossy black with a faint warm glow so it reads in the wood's shade; bare: a pale, dry, matte crust at the bottom
+  tar.material.color.copy(col(s.ready?'#0c0a0b':'#8a7458')); tar.material.shininess=s.ready?80:2; tar.material.specular.copy(col(s.ready?'#c09a6a':'#000000'));
+  tar.material.emissive.copy(col(s.ready?'#3a1e08':'#000000')); }
 function give(s){
   const n=s.item==='pitch'?SCRAPE_N:1+(Math.random()<.5?1:0);
   if(G.inv&&G.inv.add)G.inv.add(s.item,n);
