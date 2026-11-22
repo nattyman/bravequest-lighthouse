@@ -1338,6 +1338,7 @@ const UC_SFX=['crane_recite','crane_quill','crane_pages','crane_split','crane_de
   'uc_drip','uc_enter','uc_ledger','uc_hit','uc_resolve','nameless_murmur','nameless_hurt','nameless_death'];
 const uc={k:0,inside:false,evtInside:false,room:null,lit:false,boss:false,dripT:1,creakT:6,murT:0,log:[]};
 const ubed={};
+const MILL_NEAR=.16, MILL_FAR=.012, MILL_SHIMMER=.1;   // the mill-race: level beside the wheel, level everywhere else, shimmer depth (each of two slow LFOs)
 const UC_O=new THREE.Vector3(0,60,-800);
 function ucW(x,y,z){ const u=G.undercroft; if(u&&u.toWorld){ try{ const v=u.toWorld(x,y,z); if(v)return new THREE.Vector3(v.x,v.y,v.z); }catch(_){} } const o=(u&&u.origin)||UC_O; return new THREE.Vector3(o.x+x,o.y+y,o.z+z); }
 function buildUndercroft(){
@@ -1350,10 +1351,13 @@ function buildUndercroft(){
     const g=ctx.createGain(); g.gain.value=m<40?.5:1; s.connect(g); g.connect(f1); g.connect(f2); s.start(); });
   ubed.choirLfo=ctx.createGain(); ubed.choirLfo.gain.value=.012; const cl=ctx.createOscillator(); cl.frequency.value=.07; cl.connect(ubed.choirLfo); ubed.choirLfo.connect(ubed.choirG.gain); cl.start();
   // the mill-race: running water in a stone channel (bright chatter + low body), louder near the mill
-  ubed.millG=ctx.createGain(); ubed.millG.gain.value=0; ubed.millG.connect(ubed.bus);
+  // (millG is the level by distance; millT rides after it and only ever scales it: a slow, uneven shimmer of ±MILL_SHIMMER×2
+  // at most, so the water is as quiet away from the mill as millG says. An LFO added straight onto millG's gain swamps it.)
+  ubed.millT=ctx.createGain(); ubed.millT.gain.value=1; ubed.millT.connect(ubed.bus);
+  ubed.millG=ctx.createGain(); ubed.millG.gain.value=0; ubed.millG.connect(ubed.millT);
   ubed.millF=filt('bandpass',900,.9,ubed.millG); loopNoise(ubed.millF);
   loopNoise(filt('lowpass',320,.8,ubed.millG),true);
-  ubed.millAM=ctx.createGain(); ubed.millAM.gain.value=.3; const ml=ctx.createOscillator(); ml.frequency.value=2.3; ml.connect(ubed.millAM); ubed.millAM.connect(ubed.millG.gain); ml.start();
+  [.31,.73].forEach(f=>{ const d=ctx.createGain(); d.gain.value=MILL_SHIMMER; const l=ctx.createOscillator(); l.frequency.value=f; l.connect(d); d.connect(ubed.millT.gain); l.start(); });
   // a dry, close room tone (packed earth and brick)
   ubed.roomG=ctx.createGain(); ubed.roomG.gain.value=0; ubed.roomG.connect(ubed.bus); loopNoise(filt('lowpass',140,.7,ubed.roomG),true);
 }
@@ -1411,7 +1415,7 @@ function updateUndercroft(_dt,mode){
   tgt(ubed.bus.gain,k*(mode==='paused'?.6:1),.3);
   const P=G.player.pos, mill=ucW(22,-6,-50), dm=Math.hypot(P.x-mill.x,P.z-mill.z);
   tgt(ubed.choirG.gain,(uc.lit?.022:.034)+(uc.boss?.02:0),1.5);
-  tgt(ubed.millG.gain,.22*U.clamp(1-(dm-4)/26,0,1)+.012,.8); tgt(ubed.millF.frequency,800+Math.sin(ctx.currentTime*.9)*180,.3);
+  tgt(ubed.millG.gain,MILL_NEAR*U.clamp(1-(dm-4)/26,0,1)+MILL_FAR,.8); tgt(ubed.millF.frequency,800+Math.sin(ctx.currentTime*.9)*180,.3);
   tgt(ubed.roomG.gain,.05,1);
   if(mode!=='play'||!uc.inside)return;
   const t=ctx.currentTime;
