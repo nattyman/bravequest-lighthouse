@@ -179,6 +179,7 @@ const STARTS=[
   {id:'cliffs-lip',name:'The cliff edge',sub:'Loop running · on the headland at the east edge, the sea and the stacks below',group:'The cliffs'},
   {id:'oils',name:'Staff oils: the bench',sub:'Loop running · at the shed’s table with kiln pitch and gorse, the Kilnfire recipe known',group:'Staff oils'},
   {id:'oils-fight',name:'Staff oils: a fight',sub:'Loop running · 3 flasks of Kilnfire Oil on the belt · at the hamlet, its hollows ahead',group:'Staff oils'},
+  {id:'thornback',name:'The Thornback',sub:'Loop running · late-game hearts and upgrades, 3 flasks of Kilnfire Oil · in the deep wood, about 20 m from one',group:'The deep wood'},
   {id:'testsave',name:'Continue test save',sub:'',group:'Saves',test:true}
 ];
 DT.starts=STARTS;
@@ -425,6 +426,9 @@ function runStart0(id){
     if(G.player.aimCamera)G.player.aimCamera(s.yaw,low?.1:.3);
     return; }
   if(id==='oils'||id==='oils-fight'){ const s=oilsSave(id); F.begin(s); oilsGive(id); if(G.player.aimCamera)G.player.aimCamera(s.yaw,.3); return; }
+  if(id==='thornback'){ const s=loopSave({lantern:true}), at=G.thornback?G.thornback.startSpot():{x:-166,y:12,z:-43,yaw:-PI/2};   // thornback.js
+    if(G.progress)s.mods.progress=G.progress.lateGame(); s.hp=14; s.pos=[at.x,at.y,at.z]; s.yaw=at.yaw; s.cp=s.pos.slice(); s.cpYaw=s.yaw; s.cpName='the deep wood';
+    F.begin(s); oilsGive('oils-fight'); if(G.progress)G.progress.apply(); if(G.player.aimCamera)G.player.aimCamera(s.yaw,.3); return; }
   if(id==='companions'){ // companions.js: both earned (a fox and the raven freed), standing by the hollow log on the moor
     const s=loopSave({lantern:true}); const N=(G.creatures&&G.creatures.negatives)||[];
     s.freed=N.map((n,i)=>(n.kind==='raven'||(n.kind==='fox'&&i===N.findIndex(m=>m.kind==='fox')))?i:-1).filter(i=>i>=0);

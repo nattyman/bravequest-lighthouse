@@ -37,7 +37,7 @@ const N={
   pose:{shRX:-.6,shRY:-.35,shRZ:.25,elR:-1.55,wrRX:.15,shLX:-.85,shLY:.45,shLZ:-.25,elL:-1.35,hdX:.32,spX:.12}
 };
 /* who can burn: the island's own monsters (monsters.js kinds), or anything that opts in with hb.oil.burn */
-const BURNS=new Set(['hollow','hound','brineling','nameless','stag']);
+const BURNS=new Set(['hollow','hound','brineling','nameless','stag','thornback']);
 const AFFECT_KINDS=new Set(['melee','bolt','shockwave']);
 
 const S={n:{},active:null,fixed:null,hint:false}; // saved

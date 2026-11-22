@@ -37,6 +37,7 @@ const P={
     chargeDmg:2,sweepDmg:2,stompDmg:2,ringSpeed:11,ringMax:14}
 };
 const MAX_TOKENS=2, LEASH=30;
+const KINDS={};   // kinds other modules add with G.monsters.define(kind,def): def = {params,name,lockOffset,build(S),fx(m,I,add),init(m,opts),update(m,dt),anim(m,dt),hit(m,info)}
 
 /* ---------------------------------------------------------------- ink fx helpers
    Everything visual about the shadows is built on ink.js (G.ink, G.SNOISE).
@@ -532,6 +533,7 @@ function attachFx(m){
   const I=INK(), c=m.parts; m.fx={list:[]};
   if(!I)return;
   const add=h=>{m.fx.list.push(h);return h;};
+  if(KINDS[m.kind]){ if(KINDS[m.kind].fx)KINDS[m.kind].fx(m,I,add); return; }
   if(m.kind==='hollow'){
     m.fx.body=add(I.emitter(c.hem,{rate:16,radius:.25,height:.3,size:[.8,2.2],life:[1.0,1.9],rise:.6,drift:.22,trail:.9,alpha:.85,color:'#0b0712'}));
     m.fx.claws=add(I.emitter(c.clawTips,{rate:3,radius:.05,size:[.15,.5],life:[.6,1.1],rise:.25,drift:.1,trail:.5,alpha:.5,drip:2.6}));
@@ -834,7 +836,7 @@ function spawn(kind,pos,opts={}){
   const S=kind==='vigilant'?sharedUniforms('#e2dcff',1.1,'#cfc8e0',1.7):sharedUniforms(kind==='stag'?'#b58cff':'#a37cff',kind==='stag'?1.8:1.7,kind==='stag'?'#2a1446':'#24103a',kind==='stag'?.5:.65);
   const SV=kind==='vigilant'?sharedUniforms('#a37cff',2.0,'#12081e',.5):null;   // the Vigilant's ink skin fades on its own
   const mat={uniforms:S}; // one set of uniforms drives every ink part of this monster (fade, flash, rim)
-  const parts=kind==='hollow'?buildHollow(S):kind==='hound'?buildHound(S):kind==='brineling'?buildBrineling(S):kind==='nameless'?buildNameless(S):kind==='vigilant'?buildVigilant(S,SV):kind==='drowned'?buildDrowned(S):buildStag(S);
+  const parts=KINDS[kind]?KINDS[kind].build(S):kind==='hollow'?buildHollow(S):kind==='hound'?buildHound(S):kind==='brineling'?buildBrineling(S):kind==='nameless'?buildNameless(S):kind==='vigilant'?buildVigilant(S,SV):kind==='drowned'?buildDrowned(S):buildStag(S);
   const y=G.floorAt(pos.x,pos.z,(pos.y!=null?pos.y:H(pos.x,pos.z))+1);
   const m={kind,boss:kind==='stag',parts,mat,rimBase:mat.uniforms.uRim.value.clone(),pos:V(pos.x,y,pos.z),home:V(pos.x,y,pos.z),
     zone:opts.zone||{x:pos.x,z:pos.z,r:20,name:'adhoc'},heading:opts.heading!=null?opts.heading:rnd()*TAU,hp:p.hp,maxHp:p.hp,
@@ -842,8 +844,8 @@ function spawn(kind,pos,opts={}){
     wt:null,pause:rnd()*2,phase:rnd()*10,speedNow:0,orbit:rnd()<.5?1:-1,orbitA:rnd()*TAU,fled:false,hitSet:new Set(),
     atk:null,dashDir:V(),travel:0,didHit:false,summoned:false,aggro:!!opts.aggro,center:V(),id:list.length,finale:!!opts.finale};
   m.hb={team:'enemy',pos:m.pos,radius:p.radius+(kind==='stag'?.2:.1),height:p.height,targetable:true,corrupt:true,
-    name:kind==='hollow'?'Hollow':kind==='hound'?'Shade Hound':kind==='brineling'?'Brineling':kind==='nameless'?'Nameless':'The Hollow Stag',
-    lockOffset:kind==='stag'?3.2:kind==='hound'?.8:kind==='brineling'?.35:kind==='nameless'?1.3:1.7, monster:m,
+    name:KINDS[kind]?KINDS[kind].name:kind==='hollow'?'Hollow':kind==='hound'?'Shade Hound':kind==='brineling'?'Brineling':kind==='nameless'?'Nameless':'The Hollow Stag',
+    lockOffset:KINDS[kind]?KINDS[kind].lockOffset:kind==='stag'?3.2:kind==='hound'?.8:kind==='brineling'?.35:kind==='nameless'?1.3:1.7, monster:m,
     alive:()=>m.alive&&!m.dying, hit:info=>onHit(m,info)};
   G.combat.add(m.hb);
   parts.root.position.copy(m.pos); parts.root.rotation.y=m.heading; parts.root.name='monster_'+kind;
@@ -859,6 +861,7 @@ function spawn(kind,pos,opts={}){
   if(opts.undercroft)m.undercroft=opts.undercroft;
   if(kind==='vigilant'){ m.skinS=SV; initVigilant(m,opts); }
   if(kind==='drowned')initDrowned(m,opts);
+  if(KINDS[kind]&&KINDS[kind].init)KINDS[kind].init(m,opts);
   if(kind==='nameless'&&opts.eatsMoths){ m.mothHunter=true; m.eatsMoths=true; m.mothRate=P.nameless.eatRate; }
   list.push(m);
   if(opts.board||opts.raid){ const R=raftInfo(); if(R)startGrip(m,R,opts.raid&&opts.raid.side,opts.raid&&opts.raid.along); }
@@ -866,6 +869,7 @@ function spawn(kind,pos,opts={}){
 }
 function onHit(m,info){
   if(info&&info.kind==='burn'){ burnHit(m,info); return; }
+  if(KINDS[m.kind]&&KINDS[m.kind].hit){ KINDS[m.kind].hit(m,info); return; }
   if(m.kind==='drowned'){ hitDrowned(m,info); return; }
   if(!m.alive||m.dying)return;
   if(m.kind==='vigilant'&&vigilantGlance(m,info))return;   // the ink skin turns the blow (TEMPLE.md)
@@ -1533,7 +1537,7 @@ function updateMonster(m,dt){
       if(m.knock){ m.parts.root.rotation.set(m.knock.rx,m.heading,m.knock.rz); }
       if(!m.boss){ m.parts.body.scale.set(1+loose*.35,1-loose*.25,1+loose*.35); } }
     if(m.boss){ G.ui.bossBar('The Hollow Stag',0); animStag(m,dt); }
-    else if(m.kind==='hollow')animHollow(m,dt); else if(m.kind==='brineling')animBrineling(m,dt); else if(m.kind==='nameless')animNameless(m,dt); else if(m.kind==='vigilant')animVigilant(m,dt); else animHound(m,dt);
+    else if(m.kind==='hollow')animHollow(m,dt); else if(m.kind==='brineling')animBrineling(m,dt); else if(m.kind==='nameless')animNameless(m,dt); else if(m.kind==='vigilant')animVigilant(m,dt); else if(KINDS[m.kind])KINDS[m.kind].anim(m,dt); else animHound(m,dt);
     if(m.parts.eyes)eyesFlare(m.parts,m.boss?.3:.1,loose,m.fade);
     if(m.parts.extra)m.parts.extra.forEach(x=>{x.transparent=true;x.opacity=m.fade;});
     if(m.st>dur){ const I=INK(); if(I){ m.center.set(m.pos.x,m.pos.y+P[m.kind].height*.45,m.pos.z);
@@ -1551,6 +1555,7 @@ function updateMonster(m,dt){
   else if(m.kind==='vigilant')updateVigilant(m,dt);
   else if(m.kind==='brineling'){ updateBrineling(m,dt); if(!m.alive)return; }
   else if(m.kind==='drowned'){ updateDrowned(m,dt); if(!m.alive)return; }
+  else if(KINDS[m.kind])KINDS[m.kind].update(m,dt);
   else updateStag(m,dt);
   if(m.state!=='return'&&!m.boss&&m.st>0&&m.zone)leashHeal(m,dt);
   if(!m.noSettle){ applyKnock(m,dt); settle(m,dt); }
@@ -1565,7 +1570,7 @@ function render(m,dt){
   const c=m.parts;
   c.root.position.copy(m.pos); c.root.rotation.y=m.heading;
   c.root.updateMatrixWorld(true);
-  if(m.kind==='hollow')animHollow(m,dt); else if(m.kind==='hound')animHound(m,dt); else if(m.kind==='brineling')animBrineling(m,dt); else if(m.kind==='nameless')animNameless(m,dt); else if(m.kind==='vigilant')animVigilant(m,dt); else if(m.kind==='drowned'){ if(!m.dying)animDrowned(m,dt); } else if(!m.dying)animStag(m,dt);
+  if(m.kind==='hollow')animHollow(m,dt); else if(m.kind==='hound')animHound(m,dt); else if(m.kind==='brineling')animBrineling(m,dt); else if(m.kind==='nameless')animNameless(m,dt); else if(m.kind==='vigilant')animVigilant(m,dt); else if(m.kind==='drowned'){ if(!m.dying)animDrowned(m,dt); } else if(KINDS[m.kind])KINDS[m.kind].anim(m,dt); else if(!m.dying)animStag(m,dt);
 }
 
 /* ---------------------------------------------------------------- spawning */
@@ -2110,6 +2115,8 @@ G.monsters={list,spawn:(kind,pos,opts)=>spawn(kind,pos,opts||{aggro:false}),
   alive:()=>list.filter(m=>m.alive&&!m.dying).length,
   get boss(){return boss;}, tokens, startStag, stagArena:()=>m_arena||arenaOf(), params:P, despawn:(m,sink)=>despawn(m,sink),
   kill:(m,info)=>{ if(m&&m.alive&&!m.dying)die(m,info||{}); },
+  /* another module's kind (thornback.js): returns the shared helpers it builds and runs on */
+  define:(kind,def)=>{ KINDS[kind]=def; P[kind]=def.params; return {takeToken,dropToken,faceTo,moveDir,stepMove,wander,playerFar,goHome,okGround,strikeAt,die,despawn,splash,ash,separation,playerPos,playerAlive,LEASH}; },
   /* COMPANIONS HOOK (companions.js): Ember's nip breaks a wind-up like a light stagger; Corvin's dive puts the next attack off.
      Never damage, never bosses. Both return true when they did something. */
   interrupt:m=>{ if(!m||m.boss||!m.alive||m.dying||m.state!=='windup'||m.raid)return false; dropToken(m); m.flare=0; m.cool=Math.max(m.cool,.6); setState(m,'hurt'); m.st=-.15; return true; },

@@ -1691,6 +1691,30 @@ G.audio.cave=caveAPI;
 G.audio.undercroft=ucAPI;
 G.audio.temple=tpAPI;
 G.audio.oils=oilAPI;
+/* ---------- the Thornback (thornback.js emits 'thornback:sfx' {name,pos}): synth placeholders, no whooshes ----------
+   Recorded names reserved for when the files exist (not in SFX_LIST yet): thornback_snort, thornback_charge,
+   thornback_tusk, thornback_glance, thornback_hide, thornback_hurt, thornback_death */
+const tbLog=[];
+function tbCrackle(t,out,n,dur,g,f){ for(let i=0;i<n;i++){ const tt=t+Math.random()*dur, d=.006+Math.random()*.018;
+  noise(tt,d,filt('bandpass',(f||2600)*(.6+Math.random()*.9),1.8,envGain(out,tt,.001,g*(.4+Math.random()*.6),0,d))); } }
+const TB_SFX={
+  snort:(t,o)=>{ for(const k of [0,.2]){ noise(t+k,.16,filt('bandpass',700+k*400,1.3,envGain(o,t+k,.01,.3,.04,.12))); } S.growl(t+.05,{dest:o,f:58,dur:.45,g:.16,lp:380}); },
+  gallop:(t,o)=>{ S.thud(t,{dest:o,g:.32,f0:95,f1:38,dur:.14,click:.5,nf:900}); },
+  tusk:(t,o)=>{ S.growl(t,{dest:o,f:88,dur:.26,g:.2,lp:640}); S.thud(t+.12,{dest:o,g:.16,f0:320,f1:160,dur:.06,click:1,nf:3200}); },
+  glance:(t,o)=>{ tbCrackle(t,o,9,.13,.16,2800); S.thud(t,{dest:o,g:.1,f0:220,f1:120,dur:.05,click:.8}); },
+  hide:(t,o,e)=>{ const how=e&&e.how;
+    if(how==='burn'){ tbCrackle(t,o,34,1.4,.13,2200); S.hiss(t,{dest:o,dur:1.2,f0:300,f1:1400,g:.07,Q:.8}); S.thud(t+1.1,{dest:o,g:.12,f0:120,f1:50,dur:.2}); }
+    else { noise(t,.09,filt('bandpass',1500,1.1,envGain(o,t,.001,.45,0,.1))); S.thud(t,{dest:o,g:.4,f0:85,f1:35,dur:.3});
+      tbCrackle(t+.04,o,how==='crack'?8:22,how==='crack'?.2:.6,.16,2000); if(how!=='crack')S.thud(t+.6,{dest:o,g:.22,f0:70,f1:30,dur:.25}); } },
+  stun:(t,o)=>{ S.thud(t,{dest:o,g:.7,f0:72,f1:28,dur:.45,click:.8,nf:1200}); tbCrackle(t,o,14,.3,.18,1900); S.moan(t+.35,{dest:o,f:82,dur:1.1,g:.07}); },
+  hurt:(t,o)=>{ const g=envGain(o,t,.01,.12,.05,.22); const sw=osc('sawtooth',230,t,t+.35,filt('bandpass',900,2.5,g)); sw.frequency.exponentialRampToValueAtTime(130,t+.3);
+    S.growl(t,{dest:o,f:70,dur:.3,g:.12}); },
+  death:(t,o)=>{ S.moan(t,{dest:o,f:96,dur:2,g:.12}); S.rumble(t+.2,{dest:o,g:.25,dur:1.6,f0:52,f1:30,lp:240}); tbCrackle(t+.3,o,16,1.2,.08,2400); }
+};
+G.on('thornback:sfx',e=>{ if(!e)return; tbLog.push({name:e.name,how:e.how||null}); if(tbLog.length>60)tbLog.shift();
+  if(!ctx)return; const f=TB_SFX[e.name]; if(!f)return;
+  try{ f(ctx.currentTime,at(e.pos?new THREE.Vector3(e.pos.x,e.pos.y,e.pos.z):null,e.name==='gallop'?5:7),e); }catch(err){ console.error('thornback sfx',err); } });
+G.audio.thornback={ get log(){return tbLog.slice();}, synth:Object.keys(TB_SFX) };
 G.system('audio',{order:92,modes:'always',
   init(){ wire(); wireCave(); wireUndercroft(); wireTemple(); wireOils(); buildUI(); },
   update(dt){
