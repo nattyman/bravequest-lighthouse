@@ -1583,10 +1583,11 @@ const tpAPI={ get active(){return tp.inside;}, get mix(){return +tp.k.toFixed(3)
    and none of it is a sweep or a whoosh: a cork, a rag on wood, a catch, a crackle, a sputter, a twig, a scraper.
    Recorded files: none yet, so nothing is fetched. Reserved names for when they exist (add each to SFX_LIST and to OIL_REC):
      oil_apply (dressing the staff), oil_ignite (a struck monster catching), oil_end (the coat running out),
-     forage_pick (picking gorse and the like), kiln_scrape (scraping pitch off the kiln).
+     forage_pick (picking gorse and the like), kiln_scrape (scraping pitch off the kiln),
+     oil_burst (a charged bolt bursting where it ends), oil_slow (a Holly Ward slow taking hold).
    ===================================================================== */
 const OIL_REC={};   // synth name -> recorded stem, e.g. dress:'oil_apply' — empty until the files exist
-const ol={log:[],burnT:-9,igniteT:-9,lastBurn:new WeakMap(),lastIgnite:new WeakMap()};
+const ol={log:[],burnT:-9,igniteT:-9,burstT:-9,slowT:-9,lastBurn:new WeakMap(),lastIgnite:new WeakMap(),lastSlow:new WeakMap()};
 /* -- synth placeholders: (t, out, o) -- */
 function crackle(t,out,n,g,spread){ for(let i=0;i<n;i++){ const tt=t+Math.random()*spread, d=rnd(.006,.022);
   noise(tt,d,filt('bandpass',rnd(1600,5200),rnd(2,4.5),envGain(out,tt,.001,g*rnd(.45,1),0,d))); } }
@@ -1609,6 +1610,15 @@ const OS={
   off(t,out){ [[0,.04],[.08,.03],[.19,.02],[.33,.012]].forEach(([dt,g])=>crackle(t+dt,out,2,g,.04));
     const s=osc('sine',220,t+.36,t+.48,envGain(out,t+.36,.002,.022,0,.08)); s.frequency.exponentialRampToValueAtTime(160,t+.44);
     noise(t+.36,.12,filt('lowpass',900,.7,envGain(out,t+.36,.01,.02,0,.1))); },
+  // a bolt bursts: one dry crack, a low thump under it and a little grit falling (no sweep; a full charge a touch heavier)
+  burst(t,out,o){ const k=o&&o.great?1.3:1;
+    noise(t,.025,filt('highpass',1400,.7,envGain(out,t,.001,.11*k,0,.025)));
+    S.thud(t+.005,{dest:out,g:.16*k,f0:120,f1:46,dur:.2*k,click:.35,nf:900});
+    crackle(t+.05,out,o&&o.great?6:4,.03*k,.22); },
+  // a holly slow takes hold: a faint, dry leaf-tick and a soft low hush under it (quiet; rate-limited where it is wired)
+  slow(t,out){ noise(t,.01,filt('bandpass',3600,4,envGain(out,t,.001,.025,0,.01)));
+    noise(t+.015,.16,filt('lowpass',700,.7,envGain(out,t+.015,.03,.018,0,.12)),true);
+    const s=osc('triangle',150,t,t+.2,envGain(out,t,.01,.012,0,.16)); s.frequency.exponentialRampToValueAtTime(118,t+.18); },
   // a sprig snapped off a bush: two twig cracks and a short rustle
   pick(t,out){ noise(t,.012,filt('bandpass',3200,3,envGain(out,t,.001,.08,0,.012))); noise(t+.03,.008,filt('bandpass',2600,3,envGain(out,t+.03,.001,.05,0,.01)));
     noise(t+.01,.15,filt('bandpass',2200,.7,envGain(out,t+.01,.02,.03,0,.12))); },
@@ -1642,11 +1652,19 @@ function wireOils(){
     if(t-ol.burnT<.3)return;
     if(k&&typeof k==='object'){ if(t-(ol.lastBurn.get(k)||-9)<.8||t-(ol.lastIgnite.get(k)||-9)<.35)return; ol.lastBurn.set(k,t); }
     ol.burnT=t; ofx('burn',oilAt(e)||pNear(1),{ref:3}); });
+  // a burst: at most one every .1 s (a pierce or a crowd can end several bolts at once)
+  G.on('oil:burst',e=>{ if(!ctx||!e)return; const t=now(); if(t-ol.burstT<.1)return; ol.burstT=t;
+    const p=V3(e.pos); if(p)p.y+=.4; ofx('burst',p||pNear(2),{ref:5,arg:{great:!!e.great}}); });
+  // a slow taking hold: never more than one every .5 s overall, and once in 2 s per target (a restarted slow stays quiet)
+  G.on('oil:slow',e=>{ if(!ctx)return; const t=now(), k=oilKey(e);
+    if(t-ol.slowT<.5)return;
+    if(k&&typeof k==='object'){ if(t-(ol.lastSlow.get(k)||-9)<2)return; ol.lastSlow.set(k,t); }
+    ol.slowT=t; ofx('slow',oilAt(e)||pNear(1),{ref:3}); });
   G.on('forage:pick',e=>{ if(!ctx||!e)return; const p=V3(e.pos)||pNear(.6);
     ofx(e.item==='pitch'?'scrape':'pick',p,{ref:3}); });
 }
 const oilAPI={ get log(){return ol.log.slice();}, synth:OS, rec:OIL_REC,
-  /** play an oil / forage sound by its synth name (dress, on, ignite, burn, off, pick, scrape) */
+  /** play an oil / forage sound by its synth name (dress, on, ignite, burn, off, burst, slow, pick, scrape) */
   play(name,pos){ return !!ofx(name,pos?new THREE.Vector3(pos.x,pos.y+1,pos.z):null); } };
 /* -- the Resisting Tree's sap and fixing an oil in the staff (forage.js, progression.js). Spec: OILS.md, slice 3.
    Synth names: sap, dead, restored, fixed. No sweeps: slow swells, drips, a hum, a knock in the grain.

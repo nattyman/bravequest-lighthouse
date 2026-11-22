@@ -153,11 +153,45 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
   fix(id), unfix(), burning(target), slowed(target), openPicker(), debug:{give(id,n), coat(id,secs), expire(), state()}}`. `OILS` is a table keyed by
   oil id (`kilnfire` first); flasks are carried on the belt (up to `max`, any mix) and brewed at an alchemy table. Dressing takes about 1.2 s (the
   flask is spent when it starts; no attacking, half speed); the coat then lasts 90 s of play and a new coat replaces it. Effects key a target by
-  `hb.oilKey || hb.monster || hb`. Dormant until `G.loop.active`. Persist key `oils`.
+  `hb.oilKey || hb.monster || hb`. Dormant until `G.loop.active`. Persist key `oils`. Oils so far: `kilnfire` (staff blows set the target
+  burning), `burst` (a player bolt bursts where it ends, a `blast` strike that spares everything the bolt hit and every hurtbox sharing an
+  `oilKey` with one of those), `holly` (struck monsters move slower for a while; never the stag or a boss).
+  - Opt-in fields on a hurtbox: `hb.oil = {burn:bool, slow:bool}` says whether an oil may set it burning / slow it (missing = no);
+    `hb.oilKey` (one shared object for every hurtbox of a boss) makes all its parts one target, so it burns once and a burst counts once.
+    A boss decides in its own `hit()` what a `burn` tick or a `blast` does (land only where a plain blow would, never for the Wreck Giant).
+  - A Holly slow is `m.oilSlow = {t, k}` on a monsters.js monster (seconds left, speed multiplier), multiplied into its movement.
 - Forage (js/forage.js): `G.forage = {ITEMS, spots:[{id,item,pos,ready,left}], kiln:{pos,noteRead}, tree, debug:{ripen(), pick(id), near(item), tp(id)}}`.
   Spots are saved by `id`, never by index; `left` counts down in play. Kiln pitch (Interact at the old charcoal kiln in the wood, +2) and gorse
-  (walk into a bush on the moor or headland, +1-2) both come back after 240 s. Dormant until `G.loop.active`. Persist key `forage`.
+  (walk into a bush on the moor or headland, +1-2) both come back after 240 s; holly berries (`holly`, the deep wood's holly bushes, more of
+  them far west) the same way. Notes read are kept in the save (`notes.kiln`; `notes.cavePage`: the keeper's page on the sea cave's bench,
+  readable only inside the cave, teaches `burst`). Wren at the well, once saved and home, has a talk choice that teaches `holly` (once;
+  `undercroftPeople` saves `wren.holly`). Dormant until `G.loop.active`. Persist key `forage`.
 - Alchemy and oils: a recipe with `oil:'<id>'` brews a flask (`G.oils.add`) and cannot start while `G.oils.full()`; its `brew` event carries `oil`.
+- `G.forage.tree = {pos, draws (0..4), dead, restore()}`: the Resisting Tree's roots. With the loop active, Interact
+  "Draw sap" gives one `sap` per draw for three draws, each leaving the tree a step dimmer; the fourth is only taken
+  through a talk card (who "Rowan", choices "Leave it be" / "Take the last of it") and kills the tree. No prompt once it
+  is dead. `restore()` sets draws 0, brings the tree back exactly as built and emits `tree:restored` (nothing in the game
+  calls it yet). Debug: `G.forage.debug.{draw(), warn(), kill(), restore(), tpTree(angle?), treeLook()}`.
+- Events: `tree:sap {draws}` (every draw, 1-4) · `tree:dead` (the fourth draw) · `tree:restored`.
+- Persist `forage` gains `tree:{draws,dead}` (missing = a whole tree).
+- `G.world.resistingTree = {group, light, halo, motes, canopy, trunk, life, glow, dead, set({life}|{dead:true})}`:
+  the tree's look as pure state. `life` 1 = as built; `glow` = life squared drives the light (and its reach), the halo
+  (opacity and size), the motes and the violet in the wood; dead puts them out and drains the canopy and wood to grey.
+  The light stays in the scene at intensity 0 (no recompiles). forage.js is the only caller.
+- `G.oils.fixed` (null | id), `G.oils.fix(id)`, `G.oils.unfix()`, `G.oils.strength(id) -> 0|'fixed'|'coat'`; `has(id)`
+  is true for a coat or the fixed oil. A fixed oil works always at the gentler numbers in its row; a coat of the same
+  oil gives full strength while it lasts; a coat of another oil works on top. Event `oil:fixed {id,prev}` (`id` null on
+  unfix). Persist `oils` gains `fixed` (missing = nothing fixed). The staff tip shows the fixed oil's colour faintly; the
+  HUD oil chip shows a small mark for it.
+- `G.progress.fix = {cost:{flask:3,sap:1,mark:3}, rows()->[id], can(id), missing(id)->[{k,n}], temper(id), now(id,{free,silent})}`:
+  the Temper tab's "Fix an oil in the grain" section, under the seven upgrades (`UPGRADES` stays seven). One row per known
+  oil (and the fixed one). `temper(id)` runs the bench's three-second working (its banner sits in the Fix section and is
+  kept in view), then charges the cost and calls `G.oils.fix`; fixing another oil replaces it and costs again. Event
+  `progress:fix {id,prev}`. The Journal's "What you carry" lists the oils with the fixed one marked.
+- Sounds (audio.js, synth placeholders on those events): `G.audio.oils.synth` gains `sap`, `dead`, `restored`, `fixed`.
+  Reserved recorded names: `tree_sap`, `tree_dead`, `oil_fixed`.
+- Test tools start point `oils-tree`: loop running, 3 Kilnfire flasks, 3 Keeper's Marks, the Kilnfire recipe known, at
+  the Resisting Tree's roots facing the trunk.
 - Models: `G.models.lantern()` and `G.models.staff()` are defined by player.js at script-evaluation time and return fresh Object3Ds (other modules may call them in init()).
 - The north island from home (js/northveil.js, after north.js): a soft, hazy silhouette of the real island (northisle.js's
   height and sea stacks, traced once into three depth layers plus a band of sea mist; the tower in its true plane, so north.js's
@@ -191,6 +225,8 @@ path:[{x,z}]                 // centreline of the trail from lighthouse → clif
 | `oils:change` | {id, n, total} | oils (flasks on the belt changed) |
 | `oil:apply` / `oil:on` / `oil:off` | {id} / {id, dur} / {id, reason} | oils (dressing starts / the coat is on / the coat ends) |
 | `oil:ignite` / `oil:burn` | {pos, target} / {pos, target, damage} | oils (a struck target catches / each burn tick) |
+| `oil:burst` / `oil:slow` | {pos, radius, great, hits} / {pos, target} | oils (a bolt bursts / a Holly slow takes hold) |
+| `wren:holly` | {} | undercroftPeople (Wren tells the Holly Ward mixing) |
 | `forage:pick` / `forage:note` | {id, item, n, pos} / {id} | forage (something gathered, kiln pitch included / a note read) |
 | `brew` | {recipe, units, oil} | alchemy (`oil` set when the recipe makes a flask) |
 | `storm:pickup` | {first} | lighthouse (Halloran's storm lantern, `G.items.storm`) |

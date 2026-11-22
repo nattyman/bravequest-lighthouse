@@ -177,8 +177,8 @@ const STARTS=[
   {id:'companions',name:'Companions',sub:'Loop running · Ember and Corvin with you · on the moor by the hollow log',group:'Companions',main:false},
   {id:'cliffs-sandbar',name:'Under the south cliff',sub:'Loop running, low tide · on the sand bar at the foot of the cliff, looking up the face',group:'The cliffs'},
   {id:'cliffs-lip',name:'The cliff edge',sub:'Loop running · on the headland at the east edge, the sea and the stacks below',group:'The cliffs'},
-  {id:'oils',name:'Staff oils: the bench',sub:'Loop running · at the shed’s table with kiln pitch and gorse, the Kilnfire recipe known',group:'Staff oils'},
-  {id:'oils-fight',name:'Staff oils: a fight',sub:'Loop running · 3 flasks of Kilnfire Oil on the belt · at the hamlet, its hollows ahead',group:'Staff oils'},
+  {id:'oils',name:'Staff oils: the bench',sub:'Loop running · at the shed’s table with the makings of every oil (pitch, gorse, holly, brine, ichor, glowcaps), every oil recipe known',group:'Staff oils'},
+  {id:'oils-fight',name:'Staff oils: a fight',sub:'Loop running · 3 flasks of Kilnfire Oil on the belt, every oil recipe known · at the hamlet, its hollows ahead',group:'Staff oils'},
   {id:'oils-tree',name:'Staff oils: the old tree',sub:'Loop running · 3 Kilnfire flasks, 3 Keeper’s Marks, the recipe known · at the Resisting Tree’s roots, to draw sap',group:'Staff oils'},
   {id:'testsave',name:'Continue test save',sub:'',group:'Saves',test:true}
 ];
@@ -318,8 +318,10 @@ function oilsSave(id){
 }
 function oilsGive(id){
   const I=G.inv, A=G.alchemy, O=G.oils, has=k=>!!(I&&I.ITEMS&&I.ITEMS[k]);
-  if(A&&A.learn&&A.recipes&&A.recipes.kilnfire){ try{ A.learn('kilnfire',{silent:true}); }catch(e){ console.error('devtools learn',e); } }
-  if(id==='oils'){ if(has('pitch'))I.add('pitch',4,{silent:true}); if(has('gorse'))I.add('gorse',8,{silent:true}); return; }   // four brews' worth
+  if(A&&A.learn&&A.recipes)for(const r of ['kilnfire','burst','holly'])if(A.recipes[r]){ try{ A.learn(r,{silent:true}); }catch(e){ console.error('devtools learn',e); } }
+  if(id==='oils'){ // four Kilnfire brews' worth, and two each of Burst and Holly Ward
+    for(const [k,n] of [['pitch',8],['gorse',8],['holly',4],['brine',4],['ichor',2],['glowcap',2]])if(has(k))I.add(k,n,{silent:true});
+    return; }
   if(O&&O.debug&&O.debug.give){ try{ O.debug.give('kilnfire',3); }catch(e){ console.error('devtools oils',e); } }
 }
 /* 'oils-tree' (forage.js's sap, progression.js's Fix section; Spec: OILS.md): the loop save at the Resisting Tree's roots,
