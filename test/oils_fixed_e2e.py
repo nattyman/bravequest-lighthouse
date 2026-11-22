@@ -396,7 +396,11 @@ async def touch_suite(b):
         await run(pg,'touch:open',60,"(()=>{ T.settle(20); T.openFix(); window.__before=T.st(); T.watchBusy(); return {row:T.fixRow('kilnfire')}; })()",
             lambda r:r['row'] and r['row']['enabled'],N+('touch:draw',))
         if 'touch:open' not in failed:
-            try: await pg.tap('#temperList [data-fix=kilnfire]',timeout=30000); ok=True
+            # a real touch on the Fix button where it is drawn (page.tap's own waiting never settles on this busy page)
+            try:
+                xy=await ev(pg,"(()=>{ const b=document.querySelector('#temperList [data-fix=kilnfire]'); b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); const x=(r.left+r.right)/2, y=(r.top+r.bottom)/2; const top=document.elementFromPoint(x,y); return {x,y,hit:top===b}; })()")
+                if not xy['hit']: raise Exception('the Fix button is covered: '+json.dumps(xy))
+                await asyncio.wait_for(pg.touchscreen.tap(xy['x'],xy['y']),30); ok=True
             except Exception as e: check('touch:tap-fix',False,{'error':str(e)[:200]}); ok=False
             if ok:
                 await pg.wait_for_timeout(600)
