@@ -31,6 +31,7 @@ const ITEMS={
   ichor:{name:'Ichor',plural:'Ichor',desc:'Black and glossy. What is left of a corrupted thing. It is still warm.',icon:'<svg viewBox="0 0 16 16"><path d="M8 1.6C10 5 12.4 7.6 12.4 10.2A4.4 4.4 0 0 1 3.6 10.2C3.6 7.6 6 5 8 1.6z" fill="#0c0910" stroke="#9a6cff" stroke-width="1"/><path d="M6 9.6c.2-1.2.8-2 1.4-2.6" stroke="#d6bcff" stroke-width=".9" fill="none" stroke-linecap="round"/></svg>'},
   pitch:{name:'Kiln Pitch',plural:'Kiln Pitch',desc:'Black pitch scraped warm off the old kiln floor. It smells of smoke and resin.',icon:'<svg viewBox="0 0 16 16"><path d="M3.4 6h9.2l-.9 6.4a2 2 0 0 1-2 1.6H6.3a2 2 0 0 1-2-1.6z" fill="#8a5a3a" stroke="#3a2418" stroke-width=".8"/><ellipse cx="8" cy="6" rx="4.6" ry="1.4" fill="#1a110c" stroke="#e3a13a" stroke-width=".8"/><path d="M6 6.1c.8-.5 2.2-.6 3.2-.2" stroke="#f0c27a" stroke-width=".7" fill="none" stroke-linecap="round"/><path d="M10.7 6.8c.3 1.4.1 2.5-.4 3.1" stroke="#1a110c" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg>'},
   gorse:{name:'Gorse Blossom',plural:'Gorse Blossoms',desc:'Yellow flowers off the moor’s gorse, spiny-stemmed and smelling of coconut.',icon:'<svg viewBox="0 0 16 16"><path d="M8 15V5M8 10.2 4.6 7.8M8 8l3.2-2.2M8 12.6l2.8-1.6" stroke="#4f7a3a" stroke-width="1.2" fill="none" stroke-linecap="round"/><circle cx="8" cy="3.6" r="2" fill="#f4c430"/><circle cx="4.2" cy="7" r="1.7" fill="#f4c430"/><circle cx="11.6" cy="5" r="1.7" fill="#f4c430"/><circle cx="11.2" cy="10.6" r="1.4" fill="#f4c430"/><circle cx="7.6" cy="3.1" r=".7" fill="#fff0a0"/></svg>'},
+  holly:{name:'Holly Berries',plural:'Holly Berries',desc:'Bright red berries off the deep wood’s holly. Bitter, and not for eating.',icon:'<svg viewBox="0 0 16 16"><path d="M8 7.5C6.6 5.6 4 5.2 2 5.8c1 .6 1.2 1.6.8 2.4 1.6-.5 3.6-.3 5.2-.7zM8 7.5c1.4-1.9 4-2.3 6-1.7-1 .6-1.2 1.6-.8 2.4-1.6-.5-3.6-.3-5.2-.7z" fill="#3f6a3a" stroke="#244020" stroke-width=".6"/><circle cx="6.4" cy="10.4" r="2" fill="#c8262c"/><circle cx="9.8" cy="10.8" r="2" fill="#d33a32"/><circle cx="8.2" cy="8.4" r="1.8" fill="#b81f28"/><circle cx="5.8" cy="9.8" r=".55" fill="#ffd0c8"/><circle cx="9.2" cy="10.2" r=".55" fill="#ffd0c8"/></svg>'},
   vial:{name:'Ether Vial',plural:'Ether Vials',desc:'Refined ether, ready for the lamp.',chip:false,icon:'<svg viewBox="0 0 16 16"><path d="M6.2 1.8h3.6v1.6H9.4v2.8l2.8 5.2a2 2 0 0 1-1.8 3H5.6a2 2 0 0 1-1.8-3l2.8-5.2V3.4h-.4z" fill="rgba(220,235,232,.35)" stroke="#e6dcef" stroke-width=".9"/><path d="M5 10.6h6l.8 1.6a1.2 1.2 0 0 1-1.1 1.8H5.3a1.2 1.2 0 0 1-1.1-1.8z" fill="#b37cff"/></svg>'}
 };
 const ORDER=Object.keys(ITEMS);
@@ -83,7 +84,11 @@ const RECIPES={
     note:'Two caps to bind it, one bead of ichor to give back what was stolen. Warm going down. Mends three hearts.',from:'the keeper’s logbook'},
   // staff oils (Spec: OILS.md): a row with oil:'<id>' brews one flask onto G.oils' belt (oils.js) and lists under "Oils"
   kilnfire:{id:'kilnfire',name:'Kilnfire Oil',needs:{pitch:1,gorse:2},oil:'kilnfire',
-    note:'Kiln pitch worked warm with gorse flower. Dress the staff with it and what you strike catches.',from:'a charcoal-burner’s note'}
+    note:'Kiln pitch worked warm with gorse flower. Dress the staff with it and what you strike catches.',from:'a charcoal-burner’s note'},
+  burst:{id:'burst',name:'Burst Oil',needs:{pitch:1,brine:2,ichor:1},oil:'burst',
+    note:'Pitch with brine and ichor. A charged bolt bursts where it lands.',from:'a keeper’s page'},
+  holly:{id:'holly',name:'Holly Ward',needs:{pitch:1,holly:2,glowcap:1},oil:'holly',
+    note:'Holly berries crushed into pitch with a glowcap. What you strike slows.',from:'Wren'}
 };
 const RORDER=['tincture','mender','tidewater','ichor','pearl','bait'];
 const OORDER=Object.keys(RECIPES).filter(id=>RECIPES[id].oil); // oil recipes, in RECIPES order

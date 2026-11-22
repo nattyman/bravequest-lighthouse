@@ -241,7 +241,7 @@ function update(m,dt){
         if(dP<T.swipeRange&&L.takeToken(m)){ m.swipeSide=rnd()<.5?1:-1; go(m,'swipeWind'); G.emit('thornback:windup',{monster:m,atk:'swipe'}); break; }
         if(dP>=T.chargeMin&&dP<=T.chargeMax&&L.takeToken(m)){ go(m,'windCharge'); G.emit('thornback:windup',{monster:m,atk:'charge'}); emitAt(m,'snort'); break; }
       }
-      if(dP>T.swipeRange*.8){ const s=T.walk*slow; if(!L.moveDir(m,m.heading,s,dt))m.heading+=.5*dt*(m.orbit||1); m.speedNow=s; }
+      if(dP>T.swipeRange*.8){ const s=T.walk*slow; if(!L.moveDir(m,m.heading,T.walk,dt))m.heading+=.5*dt*(m.orbit||1); m.speedNow=s; }
       else m.speedNow=0;
       break;}
     case 'windCharge':
@@ -422,7 +422,7 @@ function startSpot(){ // the Test tools start point: 20 m east of the north home
 }
 
 /* ---------------------------------------------------------------- registration, save, system */
-L=G.monsters.define('thornback',{params:T,name:'Thornback',lockOffset:1.05,build,fx,init,update,anim,hit});
+L=G.monsters.define('thornback',{params:T,name:'Thornback',lockOffset:1.05,oil:{burn:true,slow:true},build,fx,init,update,anim,hit});
 const regSave=()=>G.persist.register('thornback',{
   save:()=>{ if(!looping())return null; const wait={}; for(const h of homes){ const w=h.m?(h.m.dying?T.respawn:0):Math.max(0,h.wait); if(w>0||(!h.m&&h.filled))wait[h.id]=Math.ceil(w); } return {v:1,wait}; },
   load:d=>{ const w=(d&&d.wait)||{}; for(const h of homes){ if(w[h.id]!=null){ if(h.m&&h.m.alive)L.despawn(h.m,false); h.m=null; h.wait=+w[h.id]||0; h.filled=true; } } }});

@@ -233,6 +233,7 @@ const hollows=[];
 let body=null, shell=null, armMesh=null, armMat=null, tenMesh=null, tenMat=null, heart=null, heartGlow=null, hoodVoid=null, eyes=[], spill=null;
 const decals=[], arms=[], roots=[];
 let sector=null, bodyHB=null, handHBs=[];
+const oilKey={boss:'gloaming'};   // body, hands and roots: one target to an oil (roots never burn)
 const say=(k,text,who)=>{ if(B.said[k])return false; B.said[k]=1; ui('say',text,who); return true; };
 
 /* ---------------------------------------------------------------- build */
@@ -284,11 +285,11 @@ function build(){
     sector.frustumCulled=false; sector.visible=false; sector.renderOrder=3; G.scene.add(sector); }
   buildTendrils();
   // hurtboxes
-  bodyHB={team:'enemy',pos:V(0,-999,0),radius:2.6,height:T.H-1,name:'The Gloaming',lockOffset:4.2,corrupt:false,gloaming:true,
+  bodyHB={team:'enemy',oilKey,oil:{burn:true},pos:V(0,-999,0),radius:2.6,height:T.H-1,name:'The Gloaming',lockOffset:4.2,corrupt:false,gloaming:true,
     get targetable(){ return active()&&B.state!=='intro'; },
     alive:()=>active()&&B.rise>.6&&B.state!=='dying',hit:info=>hitBody(info)};
   G.combat&&G.combat.add(bodyHB);
-  for(const ar of arms.slice(0,2)){ const hb={team:'enemy',pos:V(0,-999,0),radius:1.7,height:1.8,name:'The Gloaming’s hand',targetable:false,corrupt:false,gloaming:true,
+  for(const ar of arms.slice(0,2)){ const hb={team:'enemy',oilKey,oil:{burn:true},pos:V(0,-999,0),radius:1.7,height:1.8,name:'The Gloaming’s hand',targetable:false,corrupt:false,gloaming:true,
       alive:()=>active()&&ar.hardT>0,hit:info=>hitHand(ar,info)}; ar.hb=hb; handHBs.push(hb); G.combat&&G.combat.add(hb); }
   hideAll();
 }
@@ -311,7 +312,7 @@ function buildTendrils(){
     for(let s=0;s<n-1;s++)for(let k=0;k<R;k++){ const a=o+s*R+k,b=o+(s+1)*R+k,c=o+s*R+(k+1)%R,d=o+(s+1)*R+(k+1)%R; idx.push(a,c,b,b,c,d); }
     const rx=cx+Math.cos(a0)*(oR+.9), rz=cz+Math.sin(a0)*(oR+.9);
     const root={i,a0,pos:V(rx,ground(rx,rz,base+3),rz),hp:T.rootHp,cut:false,grow:0,live:0,delay:0,hit:0,active:false,ring:null};
-    root.hb={team:'enemy',pos:root.pos,radius:1.15,height:1.8,name:'Fog root',lockOffset:.8,corrupt:false,gloaming:true,
+    root.hb={team:'enemy',oilKey,oil:{burn:false},pos:root.pos,radius:1.15,height:1.8,name:'Fog root',lockOffset:.8,corrupt:false,gloaming:true,
       get targetable(){ return root.active&&!root.cut; }, alive:()=>active()&&root.active&&!root.cut,hit:info=>hitRoot(root,info)};
     G.combat&&G.combat.add(root.hb);
     const ring=new THREE.Mesh(new THREE.PlaneGeometry(2,2).rotateX(-PI/2),new THREE.ShaderMaterial({uniforms:{uK:{value:1},uA:{value:0},uC:{value:U.col('#b893ff')}},
@@ -456,6 +457,7 @@ function hitBody(info){
   if(!active()||B.state==='intro'||B.state==='dying')return;
   if(info&&info.kind==='swarm')return;
   const hp=heartPos(_w);
+  if(info.kind==='burn'){ if(solid())damage((info.damage||1)*(B.staggerT>0?T.staggerMul:1),info,hp); return; }   // an oil's burn: only while it can be struck, health only (Spec: OILS.md)
   if(!solid()){
     // through the fog: a soft puff where the staff passed
     const p=P(), at=p&&p.pos?V(U.lerp(p.pos.x,B.pos.x,.55),p.pos.y+1.2,U.lerp(p.pos.z,B.pos.z,.55)):hp;
@@ -465,19 +467,24 @@ function hitBody(info){
     return;
   }
   // one swing sweeps the tall cylinder once
-  if(G.time-B.hitT<.12&&info.kind===B.hitKind)return; B.hitT=G.time; B.hitKind=info.kind;
+  if(G.time-B.hitT<.12&&info.kind===B.hitKind)return;
+  if(info.kind==='blast'&&!blastOnce())return; B.hitT=G.time; B.hitKind=info.kind;
   let d=(info.damage||1)*(B.staggerT>0?T.staggerMul:1);
   damage(d,info,hp);
 }
 function hitHand(ar,info){
   if(!active()||ar.hardT<=0||(info&&info.kind==='swarm'))return;
   const d=Math.min((info.damage||1)*T.handMul,T.handCap-ar.hp); if(d<=0)return;
+  if(info.kind==='burn'){ ar.hp+=d; damage(d,info); if(ar.hp>=T.handCap-.01)ar.hardT=Math.min(ar.hardT,.2); return; }   // burns count toward the hand's cap, with no recoil
+  if(info.kind==='blast'&&!blastOnce())return;
   ar.hp+=d; ar.hand=Math.min(1.6,ar.hand+.4);
   const p=ar.P[3]; damage(d,info,V(p.x,p.y+.6,p.z));
   if(ar.hp>=T.handCap-.01){ ar.hardT=Math.min(ar.hardT,.2); for(let k=0;k<16;k++)mistPuff(p.x,p.y+.5,p.z,(rnd()-.5)*5,1+rnd()*2,(rnd()-.5)*5,1,.6,2,.6,C_PALE); }
 }
 function hitRoot(r,info){
   if(!r.active||r.cut||(info&&info.kind==='swarm'))return;
+  if(info.kind==='burn')return;                     // fire never cuts a root (cutting them is what staggers it)
+  if(info.kind==='blast'&&!blastOnce())return;
   r.hp-=Math.max(1,info.damage||1); r.hit=1;
   const F=FX(); if(F&&F.splash)F.splash(V(r.pos.x,r.pos.y+.8,r.pos.z),info.dir||V(0,0,1),.8);
   SND.hurt(r.pos);
@@ -487,7 +494,10 @@ function hitRoot(r,info){
     ui('toast','Root cut',left?left+' left':'It staggers!');
     if(!left)stagger(); }
 }
+// one oil burst counts once against the Gloaming, whichever of its parts (body, hands, roots) it reaches that frame
+function blastOnce(){ if(B.blastT===G.time)return false; B.blastT=G.time; return true; }
 function damage(d,info,pos){
+  if(info&&info.kind==='burn'){ B.hp=Math.max(0,B.hp-d); if(B.phase===1&&B.hp<=T.hp*.5)enterPhase2(); if(B.hp<=0)startDying(); return; }   // no flash, recoil, splash, shake or cry
   B.hp=Math.max(0,B.hp-d); B.flash=1; B.recoil=Math.min(1,B.recoil+.35);
   const F=FX(); if(F&&F.splash)F.splash(pos,(info&&info.dir)||V(0,0,1),1.2);
   ui('shake',.15); SND.hurt(pos);

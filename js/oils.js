@@ -8,7 +8,7 @@
    Kilnfire's effect is built so far. Brewed at the alchemy table (alchemy.js calls G.oils.add).
    Hooks used in player.js: actionLock, speedMul, poseHooks, drawStaff(), staffOil (the tip's look).
    Monsters take a burn tick as a hit of kind 'burn' (monsters.js decides what that does).
-   Events: oils:change · oil:apply · oil:on · oil:off · oil:ignite · oil:burn
+   Events: oils:change · oil:apply · oil:on · oil:off · oil:ignite · oil:burn · oil:burst · oil:slow
    Persist key 'oils'. Spec: OILS.md
    ===================================================================== */
 (function(){
@@ -21,9 +21,9 @@ const col=hex=>U.col(hex);
 /* ---------- the oils (one row each; numbers live here) ---------- */
 const OILS={
   kilnfire:{id:'kilnfire',name:'Kilnfire Oil',desc:'Every staff blow sets the struck thing burning.',color:'#e3a13a',dur:90,slice:1,
-    flame:true,burn:{dps:1,secs:3,fixedSecs:2}},
+    flame:true,burn:{dmg:1,dps:1,secs:3,fixedSecs:2}},
   burst:{id:'burst',name:'Burst Oil',desc:'A charged bolt bursts where it ends.',color:'#a56cff',dur:90,slice:2,
-    burst:{dmg:3,r:2.5,greatDmg:4,greatR:3.5,fixedDmg:2,fixedR:1.8,fixedGreatDmg:3,fixedGreatR:2.5}},
+    burst:{dmg:3,r:2.5,greatDmg:4,greatR:3.5,fixedDmg:2,fixedR:1.8,fixedGreatDmg:3,fixedGreatR:2.5,kb:6}},
   holly:{id:'holly',name:'Holly Ward',desc:'Struck monsters move slower for a while.',color:'#9fc28a',dur:90,slice:2,
     slow:{k:.75,secs:4,fixedK:.85,fixedSecs:3}}
 };
@@ -36,8 +36,7 @@ const N={
   // dressing pose: staff upright in the right hand, the left hand works the oil along it
   pose:{shRX:-.6,shRY:-.35,shRZ:.25,elR:-1.55,wrRX:.15,shLX:-.85,shLY:.45,shLZ:-.25,elL:-1.35,hdX:.32,spX:.12}
 };
-/* who can burn: the island's own monsters (monsters.js kinds), or anything that opts in with hb.oil.burn */
-const BURNS=new Set(['hollow','hound','brineling','nameless','stag','thornback']);
+/* which kinds of player blow carry an oil's effect */
 const AFFECT_KINDS=new Set(['melee','bolt','shockwave']);
 
 const S={n:{},active:null,fixed:null,hint:false}; // saved
@@ -52,8 +51,15 @@ function add(id,n=1){
   if(!known(id)||!(n>0))return 0;
   const got=Math.max(0,Math.min(n|0,N.max-total())); if(!got)return 0;
   S.n[id]=(S.n[id]|0)+got; changed(id);
-  if(!S.hint){ S.hint=true; try{ G.ui.toast('Hold the draught button to dress your staff (keyboard: V)'); }catch(_){} }
+  if(!S.hint){ S.hint=true; try{ G.ui.toast(hintText()); }catch(_){} }
   return got;
+}
+/* the first-flask hint names the control for the device in use */
+function hintText(){
+  const d=G.input&&G.input.device;
+  if(d==='gamepad')return 'Hold D-pad up to dress your staff';
+  if(d==='touch')return 'Hold the bottle button to dress your staff';
+  return 'Press V (or hold H) to dress your staff';
 }
 function take(id,n=1){ if((S.n[id]|0)<n)return false; S.n[id]-=n; if(S.n[id]<=0)delete S.n[id]; changed(id); return true; }
 function list(){ return Object.keys(OILS).filter(id=>(S.n[id]|0)>0).map(id=>({id,n:S.n[id],name:OILS[id].name})); }
@@ -162,27 +168,31 @@ addEventListener('keydown',e=>{
   if(c==='Enter'||c==='Space'||c==='KeyE'){ e.preventDefault(); e.stopPropagation(); const b=document.activeElement; if(b&&pk.contains(b))b.click(); else if(opts[0])pick(opts[0].dataset.oil); }
 },true);
 
-/* ---------- effects: who a staff blow reaches, and burning ---------- */
+/* ---------- effects ----------
+   Each oil id may have an entry in FX: onHit(hb, strength, strikeEvent) for every hurtbox a player staff blow
+   (melee, technique, bolt) hits, and/or onBoltEnd(projectile, hits, strength) when a player bolt ends.
+   strength is 'coat' or 'fixed'. A new oil is a row in OILS plus an entry here. */
 const keyOf=hb=>hb.oilKey||hb.monster||hb;
-function canBurn(hb){
-  if(!hb||hb.team!=='enemy'||(hb.alive&&!hb.alive()))return false;
-  if(hb.oil&&hb.oil.burn)return true;
-  return !!(hb.monster&&BURNS.has(hb.monster.kind));
-}
+const liveEnemy=hb=>!!hb&&hb.team==='enemy'&&!(hb.alive&&!hb.alive());
+const canBurn=hb=>liveEnemy(hb)&&!!(hb.oil&&hb.oil.burn===true);   // opt-in: hb.oil={burn:true} (monsters.js, each boss file)
+const canSlow=hb=>liveEnemy(hb)&&!!(hb.oil&&hb.oil.slow===true&&hb.monster&&!hb.monster.boss);
+const playerBolt=p=>!!p&&p.team==='player'&&p.kind==='bolt';
 function playerBlow(e){
   if(!e||e.team!=='player'||!AFFECT_KINDS.has(e.kind))return false;
   const s=e.source, p=P();
-  return s===p||!!(s&&s.team==='player'&&s.kind==='bolt');   // the Traveler's own staff, or one of its bolts (not a companion)
+  return s===p||playerBolt(s);   // the Traveler's own staff, or one of its bolts (not a companion, not an oil's own blast)
 }
+const midOf=hb=>{ const v=hb.pos.clone(); v.y+=(hb.height||1.6)*.55; return v; };
+
+/* Kilnfire: burning. One burn per target (key), ticking on the part last struck that can burn. */
 const burns=new Map();   // target key -> {hb, left (ticks), t (to the next tick), fx}
-function ignite(hb){
-  const o=OILS.kilnfire, st=strength('kilnfire'); if(!st||!canBurn(hb))return;
+function ignite(hb,st){
+  const o=OILS.kilnfire; if(!canBurn(hb))return;   // the part struck can't burn (a fire-giant, a root, an inked hand): no ignition
   const k=keyOf(hb), secs=st==='coat'?o.burn.secs:o.burn.fixedSecs;
   let b=burns.get(k); const fresh=!b;
   if(!b){ b={hb,left:0,t:0,fx:null}; burns.set(k,b); }
   b.hb=hb; b.left=Math.round(secs*o.burn.dps); b.t=1/o.burn.dps;   // a new blow restarts it; never stacks
-  const pos=hb.pos.clone(); pos.y+=(hb.height||1.6)*.55;
-  G.emit('oil:ignite',{pos,target:k,fresh});
+  G.emit('oil:ignite',{pos:midOf(hb),target:k,fresh});
 }
 function stepBurns(dt){
   for(const [k,b] of burns){
@@ -191,18 +201,53 @@ function stepBurns(dt){
     b.t-=dt;
     if(b.t<=0){
       b.t+=1/OILS.kilnfire.burn.dps; b.left--;
-      const p=P(), dir=new THREE.Vector3(hb.pos.x-(p?p.pos.x:0),0,hb.pos.z-(p?p.pos.z:0)); if(dir.lengthSq()<1e-6)dir.set(0,0,1); dir.normalize();
-      try{ hb.hit({damage:1,kind:'burn',element:'fire',knockback:0,dir,source:'oil'}); }catch(e){ console.error('oil burn',e); }
-      const pos=hb.pos.clone(); pos.y+=(hb.height||1.6)*.55;
-      G.emit('oil:burn',{pos,target:k,damage:1});
+      if(canBurn(hb)){   // re-read each tick: a part can stop taking fire (a hand's ink skin comes back)
+        const p=P(), dir=new THREE.Vector3(hb.pos.x-(p?p.pos.x:0),0,hb.pos.z-(p?p.pos.z:0)); if(dir.lengthSq()<1e-6)dir.set(0,0,1); dir.normalize();
+        try{ hb.hit({damage:OILS.kilnfire.burn.dmg||1,kind:'burn',element:'fire',knockback:0,dir,source:'oil'}); }catch(e){ console.error('oil burn',e); }
+        G.emit('oil:burn',{pos:midOf(hb),target:k,damage:OILS.kilnfire.burn.dmg||1});
+      }
       if(b.left<=0||(hb.alive&&!hb.alive()))endBurn(k,b);
     }
   }
 }
 function endBurn(k,b){ burns.delete(k); if(b.fx)b.fx.visible=false; }
+
+/* Burst: a blast where a player bolt ends; never to anything the bolt itself hit (or another part of the same target) */
+function burstAt(p,st){
+  const B=OILS.burst.burst, g=!!p.great, fx=st==='fixed';
+  const dmg=fx?(g?B.fixedGreatDmg:B.fixedDmg):(g?B.greatDmg:B.dmg), radius=fx?(g?B.fixedGreatR:B.fixedR):(g?B.greatR:B.r);
+  const exclude=new Set(p.exclude||[]), keys=new Set();
+  for(const hb of exclude)if(hb.oilKey)keys.add(hb.oilKey);
+  if(keys.size)for(const hb of G.hurtboxes)if(hb.oilKey&&keys.has(hb.oilKey))exclude.add(hb);
+  const pos=p.pos.clone();
+  const hits=G.combat.strike({x:pos.x,y:pos.y,z:pos.z,radius,team:'player',damage:dmg,knockback:B.kb||6,kind:'blast',element:'burst',source:'oil',exclude});
+  try{ const gy=G.floorAt?G.floorAt(pos.x,pos.z,pos.y+1):pos.y; if(G.moves&&G.moves.burst)G.moves.burst({x:pos.x,y:Math.min(pos.y,gy+.3),z:pos.z},{radius,color:OILS.burst.color,light:false,life:.45}); }catch(e){ console.error('oil burst fx',e); }
+  G.emit('oil:burst',{pos,radius,great:g,hits});
+}
+
+/* Holly Ward: struck monsters move slower for a while (monsters.js reads m.oilSlow); bosses are never slowed */
+function slow(hb,st){
+  if(!canSlow(hb))return;
+  const H=OILS.holly.slow, m=hb.monster, k=st==='coat'?H.k:H.fixedK, t=st==='coat'?H.secs:H.fixedSecs;
+  m.oilSlow={t,k};   // a new blow restarts it
+  G.emit('oil:slow',{pos:midOf(hb),target:keyOf(hb)});
+}
+function slowed(t){ const m=t&&(t.monster||t); return !!(m&&m.oilSlow&&m.oilSlow.t>0); }
+
+const FX={
+  kilnfire:{onHit:ignite},
+  burst:{onBoltEnd:burstAt},
+  holly:{onHit:slow}
+};
 G.on('strike',e=>{
-  if(!playerBlow(e)||!e.hits||!has('kilnfire'))return;
-  for(const hb of e.hits)ignite(hb);
+  if(!playerBlow(e)||!e.hits)return;
+  for(const id in FX){ const f=FX[id].onHit, st=f&&strength(id); if(!st)continue;
+    for(const hb of e.hits){ try{ f(hb,st,e); }catch(err){ console.error('oil '+id,err); } } }
+});
+G.on('projectile:end',e=>{
+  const p=e&&e.p; if(!playerBolt(p))return;
+  for(const id in FX){ const f=FX[id].onBoltEnd, st=f&&strength(id); if(!st)continue;
+    try{ f(p,e.hits||[],st); }catch(err){ console.error('oil '+id,err); } }
 });
 
 /* flames on burning things: a small pool of sprites (no lights) */
@@ -337,7 +382,7 @@ G.oils={
   fix(id){ if(!known(id))return false; const prev=S.fixed; S.fixed=id; G.emit('oil:fixed',{id,prev}); return true; },   // fuller rules come later
   unfix(){ const prev=S.fixed; S.fixed=null; if(prev)G.emit('oil:fixed',{id:null,prev}); },
   burning:t=>!!t&&(burns.has(t)||burns.has(keyOf(t))),
-  slowed:()=>false,
+  slowed,
   openPicker, closePicker,
   debug:{
     give(id,n=1){ return add(id||'kilnfire',n); },

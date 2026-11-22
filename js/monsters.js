@@ -846,7 +846,7 @@ function spawn(kind,pos,opts={}){
   m.hb={team:'enemy',pos:m.pos,radius:p.radius+(kind==='stag'?.2:.1),height:p.height,targetable:true,corrupt:true,
     name:KINDS[kind]?KINDS[kind].name:kind==='hollow'?'Hollow':kind==='hound'?'Shade Hound':kind==='brineling'?'Brineling':kind==='nameless'?'Nameless':'The Hollow Stag',
     lockOffset:KINDS[kind]?KINDS[kind].lockOffset:kind==='stag'?3.2:kind==='hound'?.8:kind==='brineling'?.35:kind==='nameless'?1.3:1.7, monster:m,
-    alive:()=>m.alive&&!m.dying, hit:info=>onHit(m,info)};
+    alive:()=>m.alive&&!m.dying, hit:info=>onHit(m,info), oil:OIL_TAKES[kind]||(KINDS[kind]&&KINDS[kind].oil)||{burn:false,slow:false}};
   G.combat.add(m.hb);
   parts.root.position.copy(m.pos); parts.root.rotation.y=m.heading; parts.root.name='monster_'+kind;
   parts.root.traverse(o=>{if(o.isMesh){o.castShadow=kind!=='hollow'&&kind!=='nameless'&&!o.userData.noShadow&&o.material.uniforms&&!o.material.uniforms.uFray.value;}});
@@ -867,6 +867,12 @@ function spawn(kind,pos,opts={}){
   if(opts.board||opts.raid){ const R=raftInfo(); if(R)startGrip(m,R,opts.raid&&opts.raid.side,opts.raid&&opts.raid.along); }
   return m;
 }
+/* what a staff oil (oils.js) may do to each kind: burn (damage ticks) and slow (Holly Ward, through m.oilSlow). Spec: OILS.md */
+const OIL_TAKES={hollow:{burn:true,slow:true},hound:{burn:true,slow:true},brineling:{burn:true,slow:true},nameless:{burn:true,slow:true},
+  drowned:{burn:true,slow:true},stag:{burn:true,slow:false},vigilant:{burn:false,slow:false}};
+/* movement-speed multiplier from a Holly Ward slow: m.oilSlow={t seconds left, k multiplier} (oils.js sets it, the update counts it down) */
+const HOLLY_RIM=U.col('#cfe8b8').multiplyScalar(1.6);
+const slowK=m=>m.oilSlow&&m.oilSlow.t>0&&!m.boss?m.oilSlow.k:1;
 function onHit(m,info){
   if(info&&info.kind==='burn'){ burnHit(m,info); return; }
   if(KINDS[m.kind]&&KINDS[m.kind].hit){ KINDS[m.kind].hit(m,info); return; }
@@ -890,9 +896,10 @@ function onHit(m,info){
   if(m.boss&&m.state==='staggered')G.ui.shake&&G.ui.shake(.15);
 }
 /* a burn tick from a staff oil (oils.js): health only. No flinch, knockback, stagger or re-aggro; it can still kill.
-   The Vigilant's ink skin and the drowned ignore it. Spec: OILS.md */
+   The Vigilant's ink skin ignores it; a drowned sinking away can't be touched. Spec: OILS.md
+   (a 'blast' from an oil is an ordinary blow here, the same as a shockwave; a drowned takes it as a heavy one) */
 function burnHit(m,info){
-  if(!m.alive||m.dying||m.kind==='vigilant'||m.kind==='drowned')return;
+  if(!m.alive||m.dying||m.kind==='vigilant'||m.state==='sink')return;
   m.hp-=info.damage||1; m.flash=Math.max(m.flash,.35); m.lastHit=G.time;
   if(m.hp<=0)die(m,info);
 }
@@ -934,7 +941,7 @@ function stepMove(m,dx,dz){
   if(!outsideTower(m.pos.x,m.pos.z,m.pos.y,r)){m.pos.x-=dx;m.pos.z-=dz;return false;}
   return !res.blocked;
 }
-function moveDir(m,ang,speed,dt){ if(speed<=0||!(dt>0))return true; return stepMove(m,Math.sin(ang)*speed*dt,Math.cos(ang)*speed*dt); }
+function moveDir(m,ang,speed,dt){ speed*=slowK(m); if(speed<=0||!(dt>0))return true; return stepMove(m,Math.sin(ang)*speed*dt,Math.cos(ang)*speed*dt); }
 function settle(m,dt){
   const f=G.floorAt(m.pos.x,m.pos.z,m.pos.y+.7);
   if(m.pos.y>f+.02){m.vy-=22*dt;m.pos.y+=m.vy*dt;if(m.pos.y<f){m.pos.y=f;m.vy=0;}}
@@ -1559,11 +1566,13 @@ function updateMonster(m,dt){
   else updateStag(m,dt);
   if(m.state!=='return'&&!m.boss&&m.st>0&&m.zone)leashHeal(m,dt);
   if(!m.noSettle){ applyKnock(m,dt); settle(m,dt); }
+  if(m.oilSlow){ m.oilSlow.t-=dt; if(m.oilSlow.t<=0)m.oilSlow=null; }
   m.flash=Math.max(0,m.flash-dt*5); m.mat.uniforms.uFlash.value=m.flash*.9;
   m.ground.value=m.pos.y;
   // rim flares bright on wind-ups (the main telegraph)
   const fl=m.state==='staggered'?.4:1+m.flare*(m.boss?1.8:2.0);
   m.mat.uniforms.uRim.value.copy(m.rimBase).multiplyScalar(fl);
+  if(slowK(m)<1)m.mat.uniforms.uRim.value.lerp(HOLLY_RIM,.55);   // a Holly Ward slow shows as a pale green rim
 }
 function leashHeal(m,dt){ if(m.state==='idle'&&m.hp<m.maxHp&&G.time-(m.lastHit||-99)>6)m.hp=Math.min(m.maxHp,m.hp+dt*.5); }
 function render(m,dt){
@@ -1963,7 +1972,7 @@ function hitDrowned(m,info){
   if(m.hp<=0){ dieDrowned(m,info); return; }
   // heavy: a blow only staggers one if it's a heavy one (a charged swing, a slam, a plunge) or the first in a while;
   // otherwise it takes it and comes on. Once the arms are up nothing the staff does stops the grab: step out of the way
-  if(info.kind!=='swarm'&&m.state!=='attack'&&m.state!=='windup'&&m.state!=='rise'&&(d>=4||G.time-(m.flinchT||-99)>P.drowned.poise)){ m.flinchT=G.time; dropToken(m); setState(m,'hurt'); }
+  if(info.kind!=='swarm'&&m.state!=='attack'&&m.state!=='windup'&&m.state!=='rise'&&(d>=4||info.kind==='blast'||G.time-(m.flinchT||-99)>P.drowned.poise)){ m.flinchT=G.time; dropToken(m); setState(m,'hurt'); }
 }
 function dieDrowned(m,info){
   m.dying=true; m.hp=0; dropToken(m); m.st=0; m.state='dying';

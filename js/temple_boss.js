@@ -307,7 +307,7 @@ function buildHand(i){
   g.visible=false; G.scene.add(g);
   const h={i,g,arm,hand,skin,skinShell:skin.userData.handShell,hole,meshArm,pos:V(),state:'off',st:0,hp:T.handHp,skinOn:true,skinK:1,burnT:0,burnH:null,
     slamCool:0,flash:0,yaw:0,rise:0,hb:null,hitSet:new Set()};
-  h.hb={team:'enemy',pos:h.pos,radius:.65,height:1.9,targetable:true,corrupt:true,name:'A hand of ink',lockOffset:1.1,hand:h,
+  h.hb={team:'enemy',oilKey,oil:{get burn(){ return !h.skinOn; }},pos:h.pos,radius:.65,height:1.9,targetable:true,corrupt:true,name:'A hand of ink',lockOffset:1.1,hand:h,
     alive:()=>B.state==='fight'&&B.phase===1&&(h.state==='reach'||h.state==='slamWind'||h.state==='slam'||h.state==='grip'),hit:info=>hitHand(h,info)};
   G.combat.add(h.hb);
   return h;
@@ -321,11 +321,12 @@ function buildDecals(){
   seamGlow=new THREE.Mesh(new THREE.PlaneGeometry(2,2).rotateX(-PI/2),mats().seam); seamGlow.visible=false; seamGlow.renderOrder=2; G.scene.add(seamGlow);
 }
 let ansHB=null, seamHB=null, shieldHB=null;
+const oilKey={boss:'answer'};   // the Answer and its four hands are one target to an oil
 function build(){
   if(B.built)return; B.built=true; arenaGeo();
   ans=buildAnswer(); buildDecals();
   for(let i=0;i<4;i++)hands.push(buildHand(i));
-  ansHB={team:'enemy',pos:V(),radius:T.bodyR,height:T.bodyH,targetable:true,corrupt:false,name:'The Answer',lockOffset:3.4,answer:true,
+  ansHB={team:'enemy',oilKey,oil:{burn:true},pos:V(),radius:T.bodyR,height:T.bodyH,targetable:true,corrupt:false,name:'The Answer',lockOffset:3.4,answer:true,
     alive:()=>B.state==='fight'&&B.phase>=2&&B.rise>.6,hit:info=>hitAnswer(info)};
   G.combat.add(ansHB);
   // phase 3: what the swarm sees (creatures.js only lets moths hunt corrupt hurtboxes that opt in): the Answer's open hollow,
@@ -389,6 +390,8 @@ function burnHand(h){
 function hitHand(h,info){
   if(B.phase!==1||h.state==='off'||h.state==='rising'||h.state==='sink')return;
   if(info.kind==='swarm')return;
+  if(info.kind==='burn'){ if(h.skinOn)return; h.hp-=info.damage||1; if(h.hp<=0)breakHand(h); return; }   // an oil's burn: no glance, flash or splash (Spec: OILS.md)
+  if(info.kind==='blast'){ const k=h.skinOn?'blastGlanceT':'blastT'; if(B[k]===G.time)return; B[k]=G.time; }   // one burst: at most one glance and one landing blow
   if(h.skinOn){ h.flash=.35; const F=FX(); F&&F.sparks(V(h.pos.x,floorY+1.2,h.pos.z),8,.6); G.emit('temple:hand',{what:'glance',pos:h.pos.clone()});
     say('handGlance',lensOwned()?'The staff skids off the hand’s skin of ink. Burn it with the Lens first.':'The staff skids off the hand’s skin of ink.',null,{priority:'high'}); return; }
   if(G.time-(h.lastHitT||-9)<.1&&info.kind===h.lastKind)return; h.lastHitT=G.time; h.lastKind=info.kind;
@@ -526,8 +529,11 @@ function updateAttack(dt){
 }
 
 /* ---------------------------------------------------------------- hits */
+// one oil burst counts once against the Answer and its hands, in the frame it lands
+function blastOnce(){ if(B.blastT===G.time)return false; B.blastT=G.time; return true; }
 function damage(d,info,pos,real){
   if(B.hp<=0)return;
+  if(info&&info.kind==='burn'){ B.hp=Math.max(0,B.hp-d); if(B.phase===1&&B.hp<=T.p2)enterPhase(2); else if(B.phase===2&&B.hp<=T.p3)enterPhase(3); return; }   // health only: no flash, hit event or hit window
   B.hp=Math.max(0,B.hp-d); B.flash=1; B.lastHitT=G.time;
   const F=FX(); if(F)F.splash(V(pos.x,pos.y,pos.z),(info&&info.dir)||V(0,0,1),.9);
   G.emit('temple:bossHit',{damage:d,hp:B.hp,real:!!real});
@@ -536,11 +542,13 @@ function damage(d,info,pos,real){
 }
 function hitAnswer(info){
   if(B.state!=='fight'||B.phase<2||info.kind==='swarm')return;
+  if(info.kind==='burn'){ if(B.solid>=.5&&B.phase!==3)damage(info.damage||1,info); return; }   // lands only where a blow would; never a bark
   if(B.solid<.5){ // only glare: the blow goes through it
     B.glanceT=G.time; G.emit('temple:bossHit',{damage:0,hp:B.hp,glare:true});
     say('glareHit','Your staff goes through it like through a sunbeam. In the light it’s only glare.',null,{priority:'high'}); return; }
   if(B.phase===3){ say('p3hit','It hardly notices the staff now. It’s half back into the seam — the seam is what matters.',null,{priority:'high'}); B.flash=.4; return; }
-  if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return; B.lastKind=info.kind;
+  if(G.time-B.lastHitT<.12&&info.kind===B.lastKind)return;
+  if(info.kind==='blast'&&!blastOnce())return; B.lastKind=info.kind;
   if(!S.said.solidHit)later(.3,()=>say('solidHit','In the dark it has weight. The staff lands, and the hollow in it flinches.',null,{priority:'high'}));
   damage(info.damage||1,info,V(ansHB.pos.x,floorY+2.2,ansHB.pos.z),true);
 }

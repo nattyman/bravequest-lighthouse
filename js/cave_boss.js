@@ -149,6 +149,7 @@ const UT={hp:40,poolR:6.5,ringR:18,H:9,turns:2.15,
 const NB=46, NA=24, NS=16, NR=170; // body rings, arm points, moth samples, rope points
 const B={built:false,state:'sunk',st:0,hp:UT.hp,rise:0,vis:0,reveal:0,flash:0,fade:1,ang:0,phaseName:'',phaseN:0,
   cool:2,dragCD:4,slump:0,slumpDir:0,expose:0,lash:null,surge:null,drag:0,out:0,started:false,hitPlayer:false,dying:0,lens:null};
+const oilKey={boss:'undertow'};   // every Undertow hurtbox shares it, so an oil treats the creature as one target
 let A=V(), floorY=0, arenaOK=false;
 function arenaGeo(){
   A=anchor('arena','pool',LOCAL.arena.c);
@@ -273,7 +274,7 @@ function buildUndertow(){
     m.renderOrder=2; m.visible=false; G.scene.add(m); ripples.push({m,t:9,life:1.6,r0:1,r1:4}); }
   // hurtboxes + moth prey points (keyed to the hurtboxes so creatures.js keeps its hunters)
   for(let i=0;i<NS;i++){
-    const hb={team:'enemy',pos:V(),radius:i<10?1.25:.95,height:2,targetable:false,corrupt:true,name:'The Undertow',undertow:true,sample:i,
+    const hb={team:'enemy',oilKey,oil:{burn:true},pos:V(),radius:i<10?1.25:.95,height:2,targetable:false,corrupt:true,name:'The Undertow',undertow:true,sample:i,
       // creatures.js post-cure hunting opt-in: lure only in the dark; we place the moths ourselves (claimMoths/steerMoths)
       mothPrey:()=>B.rise>.5&&!S.defeated&&wantDark(),mothRange:40,mothWant:1,mothDamage:0,
       alive:()=>B.state!=='sunk'&&B.state!=='dead'&&B.state!=='dying'&&B.rise>.5,hit:info=>hitBody(i,info)};
@@ -283,7 +284,7 @@ function buildUndertow(){
   }
   for(let j=0;j<6;j++)preyLine.push({key:hbs[0],center:V(),alive:()=>hbs[0].alive(),r:2});
   for(let j=0;j<10;j++)preyRing.push({key:hbs[1],center:V(),alive:()=>hbs[1].alive(),r:2});
-  lensHB={team:'enemy',pos:V(),radius:1.0,height:1.6,get targetable(){return B.state==='miss'&&B.expose>0;},corrupt:false,name:'The Undertow’s lens',lockOffset:.8,
+  lensHB={team:'enemy',oilKey,oil:{burn:true},pos:V(),radius:1.0,height:1.6,get targetable(){return B.state==='miss'&&B.expose>0;},corrupt:false,name:'The Undertow’s lens',lockOffset:.8,
     alive:()=>B.expose>0&&B.state==='miss',hit:info=>hitCore(info)};
   G.combat.add(lensHB);
   setVisible(false);
@@ -404,6 +405,7 @@ function hitBody(i,info){
   if(B.state==='sunk'||B.state==='dying'||B.state==='dead')return;
   if(info.kind==='swarm'){ return; }           // the moths only show it; they can't hurt it
   if(info.source&&info.source.undertow)return;
+  if(info.kind==='burn'){ if(sampW[i]>=.28&&B.vis>=.5)damage(info.damage||1,info,false,samples[i]); return; }   // an oil's burn: health only, and only where a blow would land (Spec: OILS.md)
   // one swing sweeps through several of the 16 body hurtboxes at once: it lands once (the core keeps its own rule)
   if(G.time-(B.lastHitT||-9)<.3&&info.kind===B.lastHitKind)return;
   const pos=samples[i];
@@ -412,6 +414,7 @@ function hitBody(i,info){
     if(B.vis<.5)later(.4,()=>say('through','The staff goes through the dark like it’s water. There is something there — you felt it give — but you can’t strike what you can’t see.',{key:'through'}));
     return;
   }
+  if(info.kind==='blast'&&!blastOnce())return;
   B.lastHitT=G.time; B.lastHitKind=info.kind;
   damage(info.damage||1,info,false,pos);
   if(i>=10){ const ar=arms[(i-10)/3|0]; ar.hit=1; }
@@ -419,10 +422,15 @@ function hitBody(i,info){
 }
 function hitCore(info){
   if(B.state!=='miss'||B.expose<=0||info.kind==='swarm')return;
+  if(info.kind==='burn'){ damage((info.damage||1)*UT.coreMul,info,true,lensPos); return; }   // burning: no flinch back into the water
+  if(info.kind==='blast'&&!blastOnce())return;
   damage((info.damage||1)*UT.coreMul,info,true,lensPos);
   B.expose=Math.max(B.expose-.6,.25);
 }
+// one oil burst lands once on the Undertow, however many of its hurtboxes it reaches (they all share this frame)
+function blastOnce(){ if(B.blastT===G.time)return false; B.blastT=G.time; return true; }
 function damage(d,info,core,pos){
+  if(info&&info.kind==='burn'){ B.hp=Math.max(0,B.hp-d); if(B.hp<=0)startDying(); return; }   // no splash, shake, voice or hit event
   B.hp=Math.max(0,B.hp-d); B.flash=1;
   const FXk=FX(); if(FXk)FXk.splash(V(pos.x,Math.min(pos.y,floorY+1.4),pos.z),info.dir||V(0,0,1),core?1.4:.9);
   G.ui.shake&&G.ui.shake(core?.35:.12);
